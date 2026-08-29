@@ -1,0 +1,16 @@
+# Dependencias descargadas por npm. Se reconstruyen con `npm install`.
+node_modules/
+
+# Archivos locales de entorno. No deben publicarse aunque se creen después.
+.env
+.env.*
+
+# Registros temporales de npm y del sistema.
+npm-debug.log*
+*.log
+
+# Metadatos locales de editores y sistemas operativos.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

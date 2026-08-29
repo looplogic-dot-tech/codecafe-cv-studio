@@ -1,0 +1,12 @@
+server {
+    listen 80;
+    listen [::]:80;
+    server_name cv.codecafe.io;
+
+    root /opt/codecafe-studio/apps/codecafe-cv-studio;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
