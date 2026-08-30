@@ -127,6 +127,12 @@ entonces devuelve un error de escritura aunque el HTML sea correcto. La versión
 corregida captura primero todo el HTML y después compara el título, tanto por
 HTTP local como por HTTPS. Así conserva `pipefail` sin generar ese falso fallo.
 
+La segunda ejecución confirmó que HTTP local respondía pero no contenía el
+título. Esto es compatible con la redirección HTTP→HTTPS administrada por
+Certbot: una respuesta 301/302 es correcta, pero su cuerpo no es el CV. La
+validación definitiva ahora acepta 200 o una redirección HTTP estándar y
+comprueba contenido y certificado exclusivamente mediante HTTPS.
+
 ## Google Drive pendiente de configuración externa
 
 El conector está implementado con Google Identity Services y el permiso

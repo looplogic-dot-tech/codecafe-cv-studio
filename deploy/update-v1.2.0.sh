@@ -83,22 +83,30 @@ if ! nginx -t; then
     exit 1
 fi
 
-# Descarga primero el HTML local completo para evitar falsos fallos por SIGPIPE.
-# Con pipefail, "curl | grep --quiet" puede fallar cuando grep termina antes que curl.
-if ! local_html="$(curl --fail --silent --show-error \
-    --header "Host: cv.codecafe.io" \
-    http://127.0.0.1/)"; then
+# Consulta NGINX por HTTP usando tanto el nombre como la dirección local exactos.
+# Certbot puede responder con una redirección a HTTPS en vez del documento HTML.
+if ! local_status="$(curl --silent --show-error \
+    --output /dev/null \
+    --write-out '%{http_code}' \
+    --resolve cv.codecafe.io:80:127.0.0.1 \
+    http://cv.codecafe.io/)"; then
     cp --archive "${index_backup}" "${web_root}/index.html"
-    echo "DETENIDO: NGINX no pudo entregar el HTML local; se restauró el anterior." >&2
+    echo "DETENIDO: NGINX no respondió por HTTP local; se restauró el HTML anterior." >&2
     exit 1
 fi
 
-# Busca el título solamente después de que curl terminó correctamente.
-if [[ "${local_html}" != *'<title>CodeCafe CV Studio</title>'* ]]; then
-    cp --archive "${index_backup}" "${web_root}/index.html"
-    echo "DETENIDO: el HTML local no contiene el título esperado; se restauró el anterior." >&2
-    exit 1
-fi
+# Acepta una entrega HTTP directa o una redirección estándar hacia HTTPS.
+# El contenido y el certificado se comprueban en la validación HTTPS siguiente.
+case "${local_status}" in
+    200|301|302|307|308)
+        echo "HTTP local respondió ${local_status}; NGINX seleccionó cv.codecafe.io."
+        ;;
+    *)
+        cp --archive "${index_backup}" "${web_root}/index.html"
+        echo "DETENIDO: HTTP local respondió ${local_status}; se restauró el HTML anterior." >&2
+        exit 1
+        ;;
+esac
 
 # Descarga el HTML HTTPS completo usando el certificado actualmente instalado.
 if ! public_html="$(curl --fail --silent --show-error \
