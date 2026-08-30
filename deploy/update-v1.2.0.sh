@@ -83,23 +83,36 @@ if ! nginx -t; then
     exit 1
 fi
 
-# Comprueba el HTML usando el Host correcto antes de probar la dirección pública.
-if ! curl --fail --silent --show-error \
+# Descarga primero el HTML local completo para evitar falsos fallos por SIGPIPE.
+# Con pipefail, "curl | grep --quiet" puede fallar cuando grep termina antes que curl.
+if ! local_html="$(curl --fail --silent --show-error \
     --header "Host: cv.codecafe.io" \
-    http://127.0.0.1/ \
-    | grep --quiet --fixed-strings '<title>CodeCafe CV Studio</title>'; then
+    http://127.0.0.1/)"; then
     cp --archive "${index_backup}" "${web_root}/index.html"
-    echo "DETENIDO: la prueba local falló; el HTML anterior fue restaurado." >&2
+    echo "DETENIDO: NGINX no pudo entregar el HTML local; se restauró el anterior." >&2
     exit 1
 fi
 
-# Comprueba el sitio público con el certificado HTTPS actualmente instalado.
-if ! curl --fail --silent --show-error \
-    --resolve cv.codecafe.io:443:127.0.0.1 \
-    https://cv.codecafe.io/ \
-    | grep --quiet --fixed-strings '<title>CodeCafe CV Studio</title>'; then
+# Busca el título solamente después de que curl terminó correctamente.
+if [[ "${local_html}" != *'<title>CodeCafe CV Studio</title>'* ]]; then
     cp --archive "${index_backup}" "${web_root}/index.html"
-    echo "DETENIDO: la prueba HTTPS falló; el HTML anterior fue restaurado." >&2
+    echo "DETENIDO: el HTML local no contiene el título esperado; se restauró el anterior." >&2
+    exit 1
+fi
+
+# Descarga el HTML HTTPS completo usando el certificado actualmente instalado.
+if ! public_html="$(curl --fail --silent --show-error \
+    --resolve cv.codecafe.io:443:127.0.0.1 \
+    https://cv.codecafe.io/)"; then
+    cp --archive "${index_backup}" "${web_root}/index.html"
+    echo "DETENIDO: HTTPS no pudo entregar el HTML; se restauró el anterior." >&2
+    exit 1
+fi
+
+# Comprueba el título HTTPS sin interrumpir anticipadamente la descarga de curl.
+if [[ "${public_html}" != *'<title>CodeCafe CV Studio</title>'* ]]; then
+    cp --archive "${index_backup}" "${web_root}/index.html"
+    echo "DETENIDO: el HTML HTTPS no contiene el título esperado; se restauró el anterior." >&2
     exit 1
 fi
 

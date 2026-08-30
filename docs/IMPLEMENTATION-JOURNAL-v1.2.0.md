@@ -118,6 +118,15 @@ El actualizador reinicia únicamente `codecafe-cv-sync.service` para cargar los
 endpoints del historial. Antes crea `server/app.py.before-v1.2.0-FECHA`; si la
 API no responde, restaura ese programa y vuelve a iniciar solamente CV Sync.
 
+### Corrección de la verificación HTML
+
+La primera ejecución aprobó las 10 pruebas y `nginx -t`, pero activó rollback
+durante `curl | grep --quiet`. Con `set -o pipefail`, `grep` puede terminar al
+encontrar el título y cerrar la tubería mientras `curl` todavía escribe; curl
+entonces devuelve un error de escritura aunque el HTML sea correcto. La versión
+corregida captura primero todo el HTML y después compara el título, tanto por
+HTTP local como por HTTPS. Así conserva `pipefail` sin generar ese falso fallo.
+
 ## Google Drive pendiente de configuración externa
 
 El conector está implementado con Google Identity Services y el permiso
