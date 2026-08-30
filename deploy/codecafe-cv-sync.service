@@ -1,0 +1,20 @@
+[Unit]
+Description=CodeCafe CV Studio private synchronization service
+After=network.target
+
+[Service]
+Type=simple
+User=codecafe-cv
+Group=codecafe-cv
+EnvironmentFile=/etc/codecafe-cv-sync.env
+ExecStart=/usr/bin/python3 /opt/codecafe-studio/apps/codecafe-cv-studio-source/server/app.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/codecafe-studio/data/codecafe-cv-studio
+
+[Install]
+WantedBy=multi-user.target

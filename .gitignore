@@ -9,6 +9,10 @@ node_modules/
 npm-debug.log*
 *.log
 
+# Bytecode temporal generado por las pruebas del servicio Python.
+__pycache__/
+*.pyc
+
 # Metadatos locales de editores y sistemas operativos.
 .DS_Store
 Thumbs.db

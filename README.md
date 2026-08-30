@@ -15,6 +15,9 @@ persona real y debe reemplazarse con la información de cada usuario.
 - Experiencias laborales ilimitadas.
 - Core Skills, herramientas, certificaciones y proyectos opcionales.
 - Guardado local en el navegador.
+- Copias cifradas y versionadas en EC2, sin sustituir el guardado local.
+- Respaldo cifrado importable y exportable.
+- Conector opcional de Google Drive con permiso limitado `drive.file`.
 - Impresión o exportación a PDF en tamaño A4.
 - Exportación de texto compatible con ATS.
 
@@ -35,15 +38,22 @@ npm ci
 npm run build
 ```
 
-## Publicación prevista
+## Publicación
 
 - Dirección: `https://cv.codecafe.io`
 - Servidor: EC2 con NGINX.
 - Ruta aislada: `/opt/codecafe-studio/apps/codecafe-cv-studio`
-- Tipo: sitio estático, sin Docker, base de datos o puerto interno.
+- Interfaz: archivos estáticos servidos directamente por NGINX.
+- Sincronización opcional: API Python aislada en `127.0.0.1:5002`.
+- Datos: SQLite cifrado desde el navegador, separado de Atlas.
+
+La API utiliza únicamente la biblioteca estándar de Python. El CV se cifra en
+el navegador mediante AES-GCM antes de salir del dispositivo. La contraseña no
+se guarda en el navegador ni se publica en GitHub.
 
 Consulta [MIGRATION_POLICY.md](MIGRATION_POLICY.md) antes de modificar el
-proyecto y [README-EC2.md](README-EC2.md) antes de instalarlo en EC2.
+proyecto y [DEPLOY-CLOUD-SYNC.md](DEPLOY-CLOUD-SYNC.md) antes de instalar la
+sincronización en EC2.
 
 ## Autor
 

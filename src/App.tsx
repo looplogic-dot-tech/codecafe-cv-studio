@@ -1,6 +1,22 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import {
+  authorizeGoogleDrive,
+  backupDigest,
+  BackupEnvelope,
+  connectServer,
+  decryptBackup,
+  disconnectServer,
+  encryptBackup,
+  loadGoogleBackup,
+  loadRuntimeCloudConfig,
+  loadServerBackup,
+  RuntimeCloudConfig,
+  saveGoogleBackup,
+  saveServerBackup,
+  ServerSession,
+} from "./cloud";
 
 type Job = { role: string; company: string; dates: string; bullets: string };
 type Project = { name: string; stack: string; description: string };
@@ -10,6 +26,13 @@ type CV = {
   education: string; languages: string; jobs: Job[]; projects: Project[]; photo: string;
 };
 type Lang = "es" | "en";
+type BackupDocument = {
+  schema: 1;
+  savedAt: string;
+  cv: CV;
+  settings: { lang: Lang; template: "ats" | "modern"; photoOn: boolean };
+};
+type CloudStatus = "local" | "connecting" | "connected" | "syncing" | "synced" | "error" | "conflict";
 
 const seed: CV = {
   name: "Alex Rivera",
@@ -59,6 +82,14 @@ const copy = {
     certificationsHeading: "Certificaciones", educationHeading: "Educación", languagesHeading: "Idiomas",
     atsGood: "Lectura ATS optimizada", atsDetail: "Encabezados estándar · Texto seleccionable · Sin tablas complejas",
     docLanguage: "Idioma del CV", optional: "Opcional: las secciones vacías no se imprimen",
+    cloud: "Copias en la nube", cloudTitle: "Sincronización privada", cloudIntro: "Tu copia local siempre se conserva. EC2 y Google Drive reciben únicamente respaldos cifrados.",
+    syncPassword: "Contraseña de sincronización", connectEc2: "Conectar EC2", disconnect: "Desconectar",
+    loadEc2: "Cargar desde EC2", connectDrive: "Conectar Google Drive", loadDrive: "Cargar desde Drive",
+    exportBackup: "Descargar respaldo cifrado", importBackup: "Abrir respaldo cifrado", close: "Cerrar",
+    localOnly: "Guardado local", connecting: "Conectando…", connected: "EC2 conectado", syncing: "Sincronizando…",
+    synced: "EC2 y nubes actualizados", syncError: "Error de sincronización", conflict: "Existe una versión más reciente",
+    driveReady: "Google Drive conectado", driveUnavailable: "Google Drive aún no está configurado",
+    cloudLoaded: "La copia seleccionada fue cargada. Pulsa Guardar para conservarla localmente.",
   },
   en: {
     tagline: "Your experience, clearly presented.", save: "Save", saved: "✓ Saved", pdf: "Download PDF",
@@ -83,6 +114,14 @@ const copy = {
     certificationsHeading: "Certifications", educationHeading: "Education", languagesHeading: "Languages",
     atsGood: "ATS-friendly structure", atsDetail: "Standard headings · Selectable text · No complex tables",
     docLanguage: "Résumé language", optional: "Optional: empty sections are not printed",
+    cloud: "Cloud copies", cloudTitle: "Private synchronization", cloudIntro: "Your local copy is always preserved. EC2 and Google Drive receive encrypted backups only.",
+    syncPassword: "Sync password", connectEc2: "Connect EC2", disconnect: "Disconnect",
+    loadEc2: "Load from EC2", connectDrive: "Connect Google Drive", loadDrive: "Load from Drive",
+    exportBackup: "Download encrypted backup", importBackup: "Open encrypted backup", close: "Close",
+    localOnly: "Saved locally", connecting: "Connecting…", connected: "EC2 connected", syncing: "Syncing…",
+    synced: "EC2 and clouds updated", syncError: "Synchronization error", conflict: "A newer version exists",
+    driveReady: "Google Drive connected", driveUnavailable: "Google Drive is not configured yet",
+    cloudLoaded: "The selected copy was loaded. Press Save to keep it locally.",
   },
 } as const;
 
@@ -95,6 +134,14 @@ export default function Home() {
   const [template, setTemplate] = useState<"ats" | "modern">("ats");
   const [photoOn, setPhotoOn] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [cloudOpen, setCloudOpen] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus>("local");
+  const [cloudMessage, setCloudMessage] = useState("");
+  const [syncPassword, setSyncPassword] = useState("");
+  const [serverSession, setServerSession] = useState<ServerSession | null>(null);
+  const [serverRevision, setServerRevision] = useState(0);
+  const [googleToken, setGoogleToken] = useState("");
+  const [cloudConfig, setCloudConfig] = useState<RuntimeCloudConfig>({});
   const t = copy[lang];
 
   useEffect(() => {
@@ -116,6 +163,10 @@ export default function Home() {
     }
   }, []);
 
+  useEffect(() => {
+    loadRuntimeCloudConfig().then(setCloudConfig);
+  }, []);
+
   const score = useMemo(() => {
     const required = [cv.name, cv.title, cv.email, cv.phone, cv.location, cv.summary, cv.skills, cv.education];
     return Math.round((required.filter(Boolean).length / required.length) * 100);
@@ -124,12 +175,129 @@ export default function Home() {
   const set = (key: keyof CV, value: string) => setCV((v) => ({ ...v, [key]: value }));
   const setJob = (i: number, key: keyof Job, value: string) => setCV((v) => ({ ...v, jobs: v.jobs.map((j, n) => n === i ? { ...j, [key]: value } : j) }));
   const setProject = (i: number, key: keyof Project, value: string) => setCV((v) => ({ ...v, projects: v.projects.map((p, n) => n === i ? { ...p, [key]: value } : p) }));
-  const save = () => {
+  const backupDocument = (): BackupDocument => ({
+    schema: 1,
+    savedAt: new Date().toISOString(),
+    cv,
+    settings: { lang, template, photoOn },
+  });
+  const saveLocal = () => {
     localStorage.setItem("codecafe-cv", JSON.stringify(cv));
     localStorage.setItem("codecafe-cv-settings", JSON.stringify({ lang, template, photoOn }));
     setSaved(true);
     setTimeout(() => setSaved(false), 1400);
   };
+  const applyBackup = (backup: BackupDocument) => {
+    if (backup.schema !== 1 || !backup.cv || !backup.settings) throw new Error("El respaldo no corresponde a CodeCafe CV Studio.");
+    setCV({ ...seed, ...backup.cv, projects: backup.cv.projects ?? [] });
+    setLang(backup.settings.lang === "en" ? "en" : "es");
+    setTemplate(backup.settings.template === "modern" ? "modern" : "ats");
+    setPhotoOn(Boolean(backup.settings.photoOn));
+    setCloudMessage(t.cloudLoaded);
+  };
+  const syncCloud = async () => {
+    if (!syncPassword || (!serverSession && !googleToken)) return;
+    setCloudStatus("syncing");
+    setCloudMessage("");
+    try {
+      const envelope = await encryptBackup(backupDocument(), syncPassword, serverSession?.encryptionSalt);
+      if (serverSession) {
+        const digest = await backupDigest(envelope);
+        const result = await saveServerBackup(envelope, digest, serverRevision, serverSession.csrfToken);
+        setServerRevision(result.revision);
+      }
+      if (googleToken) await saveGoogleBackup(googleToken, envelope);
+      setCloudStatus("synced");
+    } catch (error) {
+      const failure = error as Error & { status?: number };
+      setCloudStatus(failure.status === 409 ? "conflict" : "error");
+      setCloudMessage(failure.message);
+    }
+  };
+  const save = async () => {
+    saveLocal();
+    await syncCloud();
+  };
+  const connectEc2 = async () => {
+    if (!syncPassword) return;
+    setCloudStatus("connecting");
+    setCloudMessage("");
+    try {
+      const session = await connectServer(syncPassword);
+      setServerSession(session);
+      setServerRevision(session.currentRevision);
+      setCloudStatus("connected");
+    } catch (error) {
+      setCloudStatus("error");
+      setCloudMessage((error as Error).message);
+    }
+  };
+  const disconnectEc2 = async () => {
+    if (serverSession) await disconnectServer(serverSession.csrfToken).catch(() => undefined);
+    setServerSession(null);
+    setServerRevision(0);
+    setCloudStatus("local");
+  };
+  const restoreEc2 = async () => {
+    if (!serverSession || !syncPassword) return;
+    try {
+      const backup = await loadServerBackup();
+      if (!backup) throw new Error("EC2 todavía no contiene respaldos.");
+      applyBackup(await decryptBackup<BackupDocument>(backup.payload, syncPassword));
+      setServerRevision(backup.revision);
+      setCloudStatus("connected");
+    } catch (error) {
+      setCloudStatus("error");
+      setCloudMessage((error as Error).message);
+    }
+  };
+  const connectDrive = async () => {
+    if (!cloudConfig.googleClientId) return;
+    try {
+      setGoogleToken(await authorizeGoogleDrive(cloudConfig.googleClientId));
+      setCloudMessage(t.driveReady);
+    } catch (error) {
+      setCloudStatus("error");
+      setCloudMessage((error as Error).message);
+    }
+  };
+  const restoreDrive = async () => {
+    if (!googleToken || !syncPassword) return;
+    try {
+      const backup = await loadGoogleBackup(googleToken);
+      if (!backup) throw new Error("Google Drive todavía no contiene respaldos.");
+      applyBackup(await decryptBackup<BackupDocument>(backup, syncPassword));
+    } catch (error) {
+      setCloudStatus("error");
+      setCloudMessage((error as Error).message);
+    }
+  };
+  const exportEncryptedBackup = async () => {
+    if (!syncPassword) return;
+    const envelope = await encryptBackup(backupDocument(), syncPassword, serverSession?.encryptionSalt);
+    const anchor = document.createElement("a");
+    anchor.href = URL.createObjectURL(new Blob([JSON.stringify(envelope, null, 2)], { type: "application/json" }));
+    anchor.download = `CodeCafe-CV-${new Date().toISOString().slice(0, 10)}.backup.json`;
+    anchor.click();
+    URL.revokeObjectURL(anchor.href);
+  };
+  const importEncryptedBackup = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !syncPassword) return;
+    try {
+      const envelope = JSON.parse(await file.text()) as BackupEnvelope;
+      applyBackup(await decryptBackup<BackupDocument>(envelope, syncPassword));
+    } catch (error) {
+      setCloudStatus("error");
+      setCloudMessage((error as Error).message);
+    } finally {
+      event.target.value = "";
+    }
+  };
+  const cloudStatusText = {
+    local: t.localOnly, connecting: t.connecting, connected: t.connected, syncing: t.syncing,
+    synced: t.synced, error: t.syncError, conflict: t.conflict,
+  }[cloudStatus];
   const loadPhoto = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -162,6 +330,7 @@ export default function Home() {
         <div className="brand"><span className="brandMark">C</span><div><strong>CodeCafe CV</strong><small>{t.tagline}</small></div></div>
         <div className="topActions">
           <div className="langSwitch" aria-label={t.docLanguage}><button className={lang === "es" ? "selected" : ""} onClick={() => setLang("es")}>ES</button><button className={lang === "en" ? "selected" : ""} onClick={() => setLang("en")}>EN</button></div>
+          <button className={`cloudButton ${cloudStatus}`} onClick={() => setCloudOpen(true)} title={t.cloud}>☁ <span>{cloudStatusText}</span></button>
           <button className="ghost" onClick={save}>{saved ? t.saved : t.save}</button>
           <button className="primary" onClick={() => window.print()}>{t.pdf}</button>
         </div>
@@ -241,6 +410,30 @@ export default function Home() {
           <div className="atsCheck"><b><span>✓</span>{t.atsGood}</b><p>{t.atsDetail}</p></div>
         </section>
       </section>
+      {cloudOpen && <div className="cloudOverlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCloudOpen(false); }}>
+        <section className="cloudPanel" role="dialog" aria-modal="true" aria-labelledby="cloud-title">
+          <div className="cloudHead"><div><span className="eyebrow">CODECAFE CLOUD</span><h2 id="cloud-title">{t.cloudTitle}</h2></div><button onClick={() => setCloudOpen(false)} aria-label={t.close}>×</button></div>
+          <p className="cloudIntro">{t.cloudIntro}</p>
+          <label>{t.syncPassword}<input className={inputClass} type="password" autoComplete="current-password" value={syncPassword} onChange={(event) => setSyncPassword(event.target.value)} /></label>
+          <div className="cloudProvider">
+            <div><b>Amazon EC2</b><span>{serverSession ? `${t.connected} · revisión ${serverRevision}` : t.localOnly}</span></div>
+            <div className="cloudActions">{serverSession
+              ? <><button onClick={restoreEc2}>{t.loadEc2}</button><button onClick={disconnectEc2}>{t.disconnect}</button></>
+              : <button className="primary" disabled={!syncPassword} onClick={connectEc2}>{t.connectEc2}</button>}
+            </div>
+          </div>
+          <div className="cloudProvider">
+            <div><b>Google Drive</b><span>{googleToken ? t.driveReady : cloudConfig.googleClientId ? t.cloud : t.driveUnavailable}</span></div>
+            <div className="cloudActions">{googleToken
+              ? <button onClick={restoreDrive}>{t.loadDrive}</button>
+              : <button disabled={!cloudConfig.googleClientId || !syncPassword} onClick={connectDrive}>{t.connectDrive}</button>}
+            </div>
+          </div>
+          <div className="cloudPortable"><button onClick={exportEncryptedBackup} disabled={!syncPassword}>{t.exportBackup}</button><label className={!syncPassword ? "disabled" : ""}>{t.importBackup}<input type="file" accept="application/json,.json" disabled={!syncPassword} onChange={importEncryptedBackup} /></label></div>
+          <div className={`cloudNotice ${cloudStatus}`}>{cloudStatusText}{cloudMessage && <small>{cloudMessage}</small>}</div>
+          <button className="cloudClose" onClick={() => setCloudOpen(false)}>{t.close}</button>
+        </section>
+      </div>}
     </main>
   );
 }
