@@ -10,28 +10,47 @@ import {
   disconnectServer,
   encryptBackup,
   loadGoogleBackup,
+  listServerBackups,
   loadRuntimeCloudConfig,
   loadServerBackup,
+  loadServerBackupRevision,
   RuntimeCloudConfig,
   saveGoogleBackup,
   saveServerBackup,
   ServerSession,
+  ServerBackupRevision,
 } from "./cloud";
+import CVLibrary from "./CVLibrary";
+import {
+  activeDocument,
+  createInitialWorkspace,
+  CVDocument,
+  CVWorkspace,
+  loadWorkspaceLocal,
+  MAX_ACTIVE_CVS,
+  newId,
+  isWorkspace,
+  replaceCurrentDocument,
+  saveWorkspaceLocal,
+} from "./workspace";
 
 type Job = { role: string; company: string; dates: string; bullets: string };
 type Project = { name: string; stack: string; description: string };
-type CV = {
+type CustomSection = { title: string; content: string };
+export type CV = {
   name: string; title: string; email: string; phone: string; location: string; linkedin: string;
   summary: string; skills: string; coreSkills: string; tools: string; certifications: string;
-  education: string; languages: string; jobs: Job[]; projects: Project[]; photo: string;
+  education: string; languages: string; jobs: Job[]; projects: Project[]; customSections: CustomSection[]; photo: string;
 };
-type Lang = "es" | "en";
-type BackupDocument = {
+export type Lang = "es" | "en";
+type LegacyBackupDocument = {
   schema: 1;
   savedAt: string;
   cv: CV;
   settings: { lang: Lang; template: "ats" | "modern"; photoOn: boolean };
 };
+type WorkspaceBackupDocument = { schema: 2; savedAt: string; workspace: CVWorkspace };
+type BackupDocument = LegacyBackupDocument | WorkspaceBackupDocument;
 type CloudStatus = "local" | "connecting" | "connected" | "syncing" | "synced" | "error" | "conflict";
 
 const seed: CV = {
@@ -56,6 +75,15 @@ const seed: CV = {
   projects: [
     { name: "Proyecto demostrativo", stack: "JavaScript · HTML · CSS", description: "Herramienta de ejemplo para organizar información y simplificar un proceso operativo." },
   ],
+  customSections: [],
+};
+
+const blankCV: CV = {
+  name: "", title: "", email: "", phone: "", location: "", linkedin: "", photo: "",
+  summary: "", skills: "", coreSkills: "", tools: "", certifications: "", education: "", languages: "",
+  jobs: [{ role: "", company: "", dates: "", bullets: "" }],
+  projects: [],
+  customSections: [],
 };
 
 const copy = {
@@ -91,6 +119,11 @@ const copy = {
     driveReady: "Google Drive conectado", driveAvailable: "Listo para conectar", driveUnavailable: "Google Drive aún no está configurado",
     passwordWarning: "Conserva esta contraseña en Bitwarden. Sin ella nadie puede descifrar los respaldos, ni siquiera el servidor.",
     cloudLoaded: "La copia seleccionada fue cargada. Pulsa Guardar para conservarla localmente.",
+    myCvs: "Mis CVs", writingActive: "Asistencia de escritura activa",
+    writingDetail: "El navegador revisa ortografía y gramática según el idioma ES/EN, sin enviar el CV a otro servicio.",
+    history: "Historial", loadRevision: "Cargar revisión",
+    customSections: "Secciones personalizadas", customSection: "Sección personalizada", sectionTitle: "Título de la sección",
+    sectionContent: "Contenido", addCustomSection: "＋ Añadir sección personalizada",
   },
   en: {
     tagline: "Your experience, clearly presented.", save: "Save", saved: "✓ Saved", pdf: "Download PDF",
@@ -124,6 +157,11 @@ const copy = {
     driveReady: "Google Drive connected", driveAvailable: "Ready to connect", driveUnavailable: "Google Drive is not configured yet",
     passwordWarning: "Keep this password in Bitwarden. Without it, nobody can decrypt the backups, including the server.",
     cloudLoaded: "The selected copy was loaded. Press Save to keep it locally.",
+    myCvs: "My CVs", writingActive: "Writing assistance active",
+    writingDetail: "Your browser checks spelling and grammar for the selected ES/EN language without sending the CV to another service.",
+    history: "History", loadRevision: "Load revision",
+    customSections: "Custom sections", customSection: "Custom section", sectionTitle: "Section title",
+    sectionContent: "Content", addCustomSection: "＋ Add custom section",
   },
 } as const;
 
@@ -142,27 +180,52 @@ export default function Home() {
   const [syncPassword, setSyncPassword] = useState("");
   const [serverSession, setServerSession] = useState<ServerSession | null>(null);
   const [serverRevision, setServerRevision] = useState(0);
+  const [serverHistory, setServerHistory] = useState<ServerBackupRevision[]>([]);
+  const [selectedRevision, setSelectedRevision] = useState(0);
   const [googleToken, setGoogleToken] = useState("");
   const [cloudConfig, setCloudConfig] = useState<RuntimeCloudConfig>({});
+  const [workspace, setWorkspace] = useState<CVWorkspace>(() => createInitialWorkspace(seed, { lang: "es", template: "ats", photoOn: false }));
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [selectedCollection, setSelectedCollection] = useState("all");
+  const [showArchived, setShowArchived] = useState(false);
+  const [creationMode, setCreationMode] = useState<"blank" | "copy" | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [draftCollection, setDraftCollection] = useState("general");
   const t = copy[lang];
 
   useEffect(() => {
     const stored = localStorage.getItem("codecafe-cv");
     const settings = localStorage.getItem("codecafe-cv-settings");
+    let migratedCV = seed;
+    let migratedLang: Lang = "es";
+    let migratedTemplate: "ats" | "modern" = "ats";
+    let migratedPhotoOn = false;
     if (stored) {
       try {
         const old = JSON.parse(stored);
-        setCV({ ...seed, ...old, projects: old.projects ?? seed.projects });
+        migratedCV = { ...seed, ...old, projects: old.projects ?? seed.projects };
       } catch {}
     }
     if (settings) {
       try {
         const s = JSON.parse(settings);
-        if (s.lang === "es" || s.lang === "en") setLang(s.lang);
-        if (s.template === "ats" || s.template === "modern") setTemplate(s.template);
-        setPhotoOn(Boolean(s.photoOn));
+        if (s.lang === "es" || s.lang === "en") migratedLang = s.lang;
+        if (s.template === "ats" || s.template === "modern") migratedTemplate = s.template;
+        migratedPhotoOn = Boolean(s.photoOn);
       } catch {}
     }
+    const loadedWorkspace = loadWorkspaceLocal(createInitialWorkspace(migratedCV, {
+      lang: migratedLang,
+      template: migratedTemplate,
+      photoOn: migratedPhotoOn,
+    }));
+    const document = activeDocument(loadedWorkspace);
+    setWorkspace(loadedWorkspace);
+    setCV({ ...seed, ...document.cv, projects: document.cv.projects ?? [], customSections: document.cv.customSections ?? [] });
+    setLang(document.settings.lang);
+    setTemplate(document.settings.template);
+    setPhotoOn(document.settings.photoOn);
+    saveWorkspaceLocal(loadedWorkspace);
   }, []);
 
   useEffect(() => {
@@ -177,24 +240,35 @@ export default function Home() {
   const set = (key: keyof CV, value: string) => setCV((v) => ({ ...v, [key]: value }));
   const setJob = (i: number, key: keyof Job, value: string) => setCV((v) => ({ ...v, jobs: v.jobs.map((j, n) => n === i ? { ...j, [key]: value } : j) }));
   const setProject = (i: number, key: keyof Project, value: string) => setCV((v) => ({ ...v, projects: v.projects.map((p, n) => n === i ? { ...p, [key]: value } : p) }));
-  const backupDocument = (): BackupDocument => ({
-    schema: 1,
-    savedAt: new Date().toISOString(),
-    cv,
-    settings: { lang, template, photoOn },
-  });
+  const setCustomSection = (i: number, key: keyof CustomSection, value: string) => setCV((v) => ({ ...v, customSections: v.customSections.map((section, n) => n === i ? { ...section, [key]: value } : section) }));
+  const workspaceWithCurrent = () => replaceCurrentDocument(workspace, cv, { lang, template, photoOn });
+  const backupDocument = (): BackupDocument => ({ schema: 2, savedAt: new Date().toISOString(), workspace: workspaceWithCurrent() });
   const saveLocal = () => {
+    const updatedWorkspace = workspaceWithCurrent();
+    setWorkspace(updatedWorkspace);
+    saveWorkspaceLocal(updatedWorkspace);
     localStorage.setItem("codecafe-cv", JSON.stringify(cv));
     localStorage.setItem("codecafe-cv-settings", JSON.stringify({ lang, template, photoOn }));
     setSaved(true);
     setTimeout(() => setSaved(false), 1400);
   };
   const applyBackup = (backup: BackupDocument) => {
-    if (backup.schema !== 1 || !backup.cv || !backup.settings) throw new Error("El respaldo no corresponde a CodeCafe CV Studio.");
-    setCV({ ...seed, ...backup.cv, projects: backup.cv.projects ?? [] });
-    setLang(backup.settings.lang === "en" ? "en" : "es");
-    setTemplate(backup.settings.template === "modern" ? "modern" : "ats");
-    setPhotoOn(Boolean(backup.settings.photoOn));
+    let restoredWorkspace: CVWorkspace;
+    if (backup.schema === 2) {
+      if (!isWorkspace(backup.workspace)) throw new Error("El respaldo contiene una biblioteca de CVs inválida.");
+      restoredWorkspace = backup.workspace;
+    } else if (backup.schema === 1 && backup.cv && backup.settings) {
+      restoredWorkspace = createInitialWorkspace(backup.cv, backup.settings);
+    } else {
+      throw new Error("El respaldo no corresponde a CodeCafe CV Studio.");
+    }
+    const document = activeDocument(restoredWorkspace);
+    setWorkspace(restoredWorkspace);
+    saveWorkspaceLocal(restoredWorkspace);
+    setCV({ ...seed, ...document.cv, projects: document.cv.projects ?? [], customSections: document.cv.customSections ?? [] });
+    setLang(document.settings.lang);
+    setTemplate(document.settings.template);
+    setPhotoOn(document.settings.photoOn);
     setCloudMessage(t.cloudLoaded);
   };
   const syncCloud = async () => {
@@ -207,6 +281,8 @@ export default function Home() {
         const digest = await backupDigest(envelope);
         const result = await saveServerBackup(envelope, digest, serverRevision, serverSession.csrfToken);
         setServerRevision(result.revision);
+        setSelectedRevision(result.revision);
+        setServerHistory(await listServerBackups());
       }
       if (googleToken) await saveGoogleBackup(googleToken, envelope);
       setCloudStatus("synced");
@@ -228,6 +304,8 @@ export default function Home() {
       const session = await connectServer(syncPassword);
       setServerSession(session);
       setServerRevision(session.currentRevision);
+      setSelectedRevision(session.currentRevision);
+      setServerHistory(await listServerBackups());
       setCloudStatus("connected");
     } catch (error) {
       setCloudStatus("error");
@@ -238,6 +316,8 @@ export default function Home() {
     if (serverSession) await disconnectServer(serverSession.csrfToken).catch(() => undefined);
     setServerSession(null);
     setServerRevision(0);
+    setSelectedRevision(0);
+    setServerHistory([]);
     setCloudStatus("local");
   };
   const restoreEc2 = async () => {
@@ -247,6 +327,18 @@ export default function Home() {
       if (!backup) throw new Error("EC2 todavía no contiene respaldos.");
       applyBackup(await decryptBackup<BackupDocument>(backup.payload, syncPassword));
       setServerRevision(backup.revision);
+      setCloudStatus("connected");
+    } catch (error) {
+      setCloudStatus("error");
+      setCloudMessage((error as Error).message);
+    }
+  };
+  const restoreEc2Revision = async () => {
+    if (!serverSession || !syncPassword || !selectedRevision) return;
+    try {
+      const backup = await loadServerBackupRevision(selectedRevision);
+      if (!backup) throw new Error("La revisión seleccionada ya no existe.");
+      applyBackup(await decryptBackup<BackupDocument>(backup.payload, syncPassword));
       setCloudStatus("connected");
     } catch (error) {
       setCloudStatus("error");
@@ -300,6 +392,126 @@ export default function Home() {
     local: t.localOnly, connecting: t.connecting, connected: t.connected, syncing: t.syncing,
     synced: t.synced, error: t.syncError, conflict: t.conflict,
   }[cloudStatus];
+  const loadDocumentIntoEditor = (document: CVDocument) => {
+    setCV({ ...seed, ...document.cv, projects: document.cv.projects ?? [], customSections: document.cv.customSections ?? [] });
+    setLang(document.settings.lang);
+    setTemplate(document.settings.template);
+    setPhotoOn(document.settings.photoOn);
+  };
+  const openDocument = (id: string) => {
+    const preserved = workspaceWithCurrent();
+    const document = preserved.documents.find((candidate) => candidate.id === id);
+    if (!document) return;
+    const updated = { ...preserved, activeDocumentId: id };
+    setWorkspace(updated);
+    saveWorkspaceLocal(updated);
+    loadDocumentIntoEditor(document);
+    setLibraryOpen(false);
+    setCloudStatus("local");
+  };
+  const createDocument = () => {
+    if (!draftName.trim() || workspace.documents.length >= MAX_ACTIVE_CVS) return;
+    const preserved = workspaceWithCurrent();
+    const current = activeDocument(preserved);
+    const now = new Date().toISOString();
+    const document: CVDocument = {
+      id: newId("cv"),
+      name: draftName.trim(),
+      collectionId: draftCollection,
+      cv: creationMode === "copy" ? structuredClone(current.cv) : structuredClone(blankCV),
+      settings: creationMode === "copy" ? { ...current.settings } : { lang, template: "ats", photoOn: false },
+      createdAt: now,
+      updatedAt: now,
+      archived: false,
+    };
+    const updated = { ...preserved, documents: [...preserved.documents, document], activeDocumentId: document.id };
+    setWorkspace(updated);
+    saveWorkspaceLocal(updated);
+    loadDocumentIntoEditor(document);
+    setCreationMode(null);
+    setDraftName("");
+    setLibraryOpen(false);
+    setCloudStatus("local");
+  };
+  const duplicateDocument = (id: string) => {
+    const preserved = workspaceWithCurrent();
+    const source = preserved.documents.find((document) => document.id === id);
+    if (!source || preserved.documents.length >= MAX_ACTIVE_CVS) return;
+    const now = new Date().toISOString();
+    const duplicate: CVDocument = {
+      ...structuredClone(source), id: newId("cv"), name: `${source.name} — Copy`, createdAt: now, updatedAt: now, archived: false,
+    };
+    const updated = { ...preserved, documents: [...preserved.documents, duplicate] };
+    setWorkspace(updated);
+    saveWorkspaceLocal(updated);
+  };
+  const archiveDocument = (id: string, archived: boolean) => {
+    const preserved = workspaceWithCurrent();
+    const activeDocuments = preserved.documents.filter((document) => !document.archived);
+    if (archived && activeDocuments.length <= 1) return;
+    const documents = preserved.documents.map((document) => document.id === id ? { ...document, archived, updatedAt: new Date().toISOString() } : document);
+    let activeDocumentId = preserved.activeDocumentId;
+    if (archived && id === activeDocumentId) {
+      const replacement = documents.find((document) => !document.archived && document.id !== id);
+      if (replacement) {
+        activeDocumentId = replacement.id;
+        loadDocumentIntoEditor(replacement);
+      }
+    }
+    const updated = { ...preserved, documents, activeDocumentId };
+    setWorkspace(updated);
+    saveWorkspaceLocal(updated);
+  };
+  const deleteDocument = (id: string) => {
+    const document = workspace.documents.find((candidate) => candidate.id === id);
+    if (!document?.archived) return;
+    const question = lang === "es" ? `¿Eliminar definitivamente “${document.name}”?` : `Permanently delete “${document.name}”?`;
+    if (!window.confirm(question)) return;
+    const updated = { ...workspace, documents: workspace.documents.filter((candidate) => candidate.id !== id) };
+    setWorkspace(updated);
+    saveWorkspaceLocal(updated);
+  };
+  const createCollection = () => {
+    const label = lang === "es" ? "Nombre de la nueva colección:" : "New collection name:";
+    const name = window.prompt(label)?.trim();
+    if (!name) return;
+    const updated = {
+      ...workspace,
+      collections: [...workspace.collections, { id: newId("collection"), name, order: workspace.collections.length }],
+    };
+    setWorkspace(updated);
+    saveWorkspaceLocal(updated);
+  };
+  const renameDocument = (id: string) => {
+    const document = workspace.documents.find((candidate) => candidate.id === id);
+    if (!document) return;
+    const label = lang === "es" ? "Nuevo nombre del CV:" : "New CV name:";
+    const name = window.prompt(label, document.name)?.trim();
+    if (!name || name === document.name) return;
+    const preserved = workspaceWithCurrent();
+    const updated = {
+      ...preserved,
+      documents: preserved.documents.map((candidate) => candidate.id === id
+        ? { ...candidate, name, updatedAt: new Date().toISOString() }
+        : candidate),
+    };
+    setWorkspace(updated);
+    saveWorkspaceLocal(updated);
+    setCloudStatus("local");
+  };
+  const moveDocument = (id: string, collectionId: string) => {
+    if (!workspace.collections.some((collection) => collection.id === collectionId)) return;
+    const preserved = workspaceWithCurrent();
+    const updated = {
+      ...preserved,
+      documents: preserved.documents.map((document) => document.id === id
+        ? { ...document, collectionId, updatedAt: new Date().toISOString() }
+        : document),
+    };
+    setWorkspace(updated);
+    saveWorkspaceLocal(updated);
+    setCloudStatus("local");
+  };
   const loadPhoto = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -317,6 +529,7 @@ export default function Home() {
       cv.tools && `${t.toolsHeading.toUpperCase()}\n${cv.tools}`,
       cv.projects.some((p) => p.name || p.description) && `${t.projectsHeading.toUpperCase()}\n${cv.projects.map((p) => `${p.name} | ${p.stack}\n${p.description}`).join("\n\n")}`,
       cv.certifications && `${t.certificationsHeading.toUpperCase()}\n${cv.certifications}`,
+      ...cv.customSections.filter((section) => section.title || section.content).map((section) => `${section.title.toUpperCase()}\n${section.content}`),
       `${t.educationHeading.toUpperCase()}\n${cv.education}`,
       `${t.languagesHeading.toUpperCase()}\n${cv.languages}`,
     ].filter(Boolean).join("\n\n");
@@ -327,11 +540,12 @@ export default function Home() {
   };
 
   return (
-    <main>
+    <main lang={lang} spellCheck={true}>
       <header className="topbar">
         <div className="brand"><span className="brandMark">C</span><div><strong>CodeCafe CV</strong><small>{t.tagline}</small></div></div>
         <div className="topActions">
           <div className="langSwitch" aria-label={t.docLanguage}><button className={lang === "es" ? "selected" : ""} onClick={() => setLang("es")}>ES</button><button className={lang === "en" ? "selected" : ""} onClick={() => setLang("en")}>EN</button></div>
+          <button className="libraryButton" onClick={() => setLibraryOpen(true)} title={`${t.myCvs}: ${activeDocument(workspace).name}`}>▤ <span>{t.myCvs}</span></button>
           <button className={`cloudButton ${cloudStatus}`} onClick={() => setCloudOpen(true)} title={t.cloud}>☁ <span>{cloudStatusText}</span></button>
           <button className="ghost" onClick={save}>{saved ? t.saved : t.save}</button>
           <button className="primary" onClick={() => window.print()}>{t.pdf}</button>
@@ -379,6 +593,13 @@ export default function Home() {
               <Field label={t.description}><textarea className={inputClass} rows={4} value={project.description} onChange={(e) => setProject(i, "description", e.target.value)} /></Field>
             </div>)}
             <button className="add" onClick={() => setCV((v) => ({ ...v, projects: [...v.projects, { name: "", stack: "", description: "" }] }))}>{t.addProject}</button>
+            <div className="subhead">{t.customSections}</div>
+            {cv.customSections.map((section, i) => <div className="jobCard" key={i}>
+              <div className="cardTitle"><b>{t.customSection} {i + 1}</b><button onClick={() => setCV((v) => ({ ...v, customSections: v.customSections.filter((_, n) => n !== i) }))}>{t.remove}</button></div>
+              <Field label={t.sectionTitle}><input className={inputClass} value={section.title} onChange={(event) => setCustomSection(i, "title", event.target.value)} /></Field>
+              <Field label={t.sectionContent}><textarea className={inputClass} rows={5} value={section.content} onChange={(event) => setCustomSection(i, "content", event.target.value)} /></Field>
+            </div>)}
+            <button className="add" onClick={() => setCV((v) => ({ ...v, customSections: [...v.customSections, { title: "", content: "" }] }))}>{t.addCustomSection}</button>
           </div>}
 
           {tab === "formacion" && <div className="formGrid">
@@ -393,6 +614,7 @@ export default function Home() {
             <div className="toggleRow"><div><b>{t.includePhoto}</b><span>{t.photoHint}</span></div><button aria-label={t.includePhoto} aria-pressed={photoOn} className={`toggle ${photoOn ? "on" : ""}`} onClick={() => setPhotoOn(!photoOn)}><i /></button></div>
             {photoOn && <label className="upload">{t.choosePhoto}<input type="file" accept="image/*" onChange={loadPhoto} /></label>}
             <button className="atsExport" onClick={exportTxt}>{t.txt}</button>
+            <div className="writingStatus"><b>✓ {t.writingActive}</b><span>{t.writingDetail}</span></div>
           </div>}
         </aside>
 
@@ -406,12 +628,37 @@ export default function Home() {
             {cv.tools && <CVSection title={t.toolsHeading}><p className="skillText">{cv.tools}</p></CVSection>}
             {cv.projects.some((p) => p.name || p.description) && <CVSection title={t.projectsHeading}>{cv.projects.filter((p) => p.name || p.description).map((project, i) => <div className="cvProject" key={i}><div><b>{project.name}</b><span>{project.stack}</span></div><p>{project.description}</p></div>)}</CVSection>}
             {cv.certifications && <CVSection title={t.certificationsHeading}>{lines(cv.certifications).map((line, i) => <p key={i}>{line}</p>)}</CVSection>}
+            {cv.customSections.filter((section) => section.title || section.content).map((section, index) => <CVSection title={section.title || t.customSection} key={`${section.title}-${index}`}>{lines(section.content).map((line, i) => <p key={i}>{line}</p>)}</CVSection>)}
             <CVSection title={t.skillsHeading}><p className="skillText">{cv.skills}</p></CVSection>
             <div className="twoCols"><CVSection title={t.educationHeading}>{lines(cv.education).map((line, i) => <p key={i}>{line}</p>)}</CVSection><CVSection title={t.languagesHeading}>{lines(cv.languages).map((line, i) => <p key={i}>{line}</p>)}</CVSection></div>
           </article>
           <div className="atsCheck"><b><span>✓</span>{t.atsGood}</b><p>{t.atsDetail}</p></div>
         </section>
       </section>
+      {libraryOpen && <CVLibrary
+        lang={lang}
+        workspace={workspace}
+        selectedCollection={selectedCollection}
+        showArchived={showArchived}
+        draftName={draftName}
+        draftCollection={draftCollection}
+        creationMode={creationMode}
+        onSelectCollection={setSelectedCollection}
+        onShowArchived={setShowArchived}
+        onDraftName={setDraftName}
+        onDraftCollection={setDraftCollection}
+        onStartCreate={(mode) => { const preserved = workspaceWithCurrent(); const current = activeDocument(preserved); setWorkspace(preserved); setCreationMode(mode); setDraftName(mode === "copy" ? `${current.name} — Copy` : ""); setDraftCollection(current.collectionId); }}
+        onCancelCreate={() => { setCreationMode(null); setDraftName(""); }}
+        onCreate={createDocument}
+        onOpen={openDocument}
+        onDuplicate={duplicateDocument}
+        onRename={renameDocument}
+        onMove={moveDocument}
+        onArchive={archiveDocument}
+        onDelete={deleteDocument}
+        onCreateCollection={createCollection}
+        onClose={() => setLibraryOpen(false)}
+      />}
       {cloudOpen && <div className="cloudOverlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCloudOpen(false); }}>
         <section className="cloudPanel" role="dialog" aria-modal="true" aria-labelledby="cloud-title">
           <div className="cloudHead"><div><span className="eyebrow">CODECAFE CLOUD</span><h2 id="cloud-title">{t.cloudTitle}</h2></div><button onClick={() => setCloudOpen(false)} aria-label={t.close}>×</button></div>
@@ -424,6 +671,10 @@ export default function Home() {
               : <button className="primary" disabled={!syncPassword} onClick={connectEc2}>{t.connectEc2}</button>}
             </div>
           </div>
+          {serverSession && serverHistory.length > 0 && <div className="revisionPicker">
+            <label>{t.history}<select className={inputClass} value={selectedRevision} onChange={(event) => setSelectedRevision(Number(event.target.value))}>{serverHistory.map((revision) => <option value={revision.revision} key={revision.revision}>#{revision.revision} · {new Date(revision.savedAt).toLocaleString(lang)}</option>)}</select></label>
+            <button onClick={restoreEc2Revision}>{t.loadRevision}</button>
+          </div>}
           <div className="cloudProvider">
             <div><b>Google Drive</b><span>{googleToken ? t.driveReady : cloudConfig.googleClientId ? t.driveAvailable : t.driveUnavailable}</span></div>
             <div className="cloudActions">{googleToken

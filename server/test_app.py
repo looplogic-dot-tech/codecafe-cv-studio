@@ -44,6 +44,9 @@ class StoreTests(unittest.TestCase):
         with self.store.connect() as database:
             self.assertEqual(2, database.execute("SELECT COUNT(*) FROM backups").fetchone()[0])
         self.assertGreater(third["revision"], second["revision"])
+        self.assertEqual([third["revision"], second["revision"]], [item["revision"] for item in self.store.revisions()])
+        self.assertEqual("two", self.store.revision(second["revision"])["payload"]["ciphertext"])
+        self.assertIsNone(self.store.revision(first["revision"]))
 
     def test_conflict_does_not_overwrite(self):
         first, _ = self.store.save(self.payload("one"), "1" * 64, 0)

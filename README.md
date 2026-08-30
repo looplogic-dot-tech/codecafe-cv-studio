@@ -20,6 +20,11 @@ persona real y debe reemplazarse con la información de cada usuario.
 - Conector opcional de Google Drive con permiso limitado `drive.file`.
 - Impresión o exportación a PDF en tamaño A4.
 - Exportación de texto compatible con ATS.
+- Biblioteca visual adaptable a teléfono con un máximo de 20 CVs en total.
+- Colecciones para separar CVs de IT, construcción, uso general u otras categorías.
+- Edición, duplicación, renombrado, movimiento, archivado y restauración.
+- Secciones personalizadas para necesidades profesionales no cubiertas por los campos predefinidos.
+- Revisión ortográfica y gramatical nativa ES/EN, sin enviar el texto a un servicio externo.
 
 ## Una sola base funcional
 
@@ -47,13 +52,17 @@ npm run build
 - Sincronización opcional: API Python aislada en `127.0.0.1:5002`.
 - Datos: SQLite cifrado desde el navegador, separado de Atlas.
 
-La API utiliza únicamente la biblioteca estándar de Python. El CV se cifra en
+La API utiliza únicamente la biblioteca estándar de Python; no usa Flask ni
+otro framework web. El CV se cifra en
 el navegador mediante AES-GCM antes de salir del dispositivo. La contraseña no
 se guarda en el navegador ni se publica en GitHub.
 
 Consulta [MIGRATION_POLICY.md](MIGRATION_POLICY.md) antes de modificar el
 proyecto y [DEPLOY-CLOUD-SYNC.md](DEPLOY-CLOUD-SYNC.md) antes de instalar la
 sincronización en EC2.
+
+El registro permanente de decisiones, comandos y validaciones de v1.2.0 está
+en [docs/IMPLEMENTATION-JOURNAL-v1.2.0.md](docs/IMPLEMENTATION-JOURNAL-v1.2.0.md).
 
 ## Autor
 

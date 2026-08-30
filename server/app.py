@@ -104,6 +104,33 @@ class Store:
             "payload": json.loads(row["payload"]),
         }
 
+    def revisions(self) -> list[dict[str, Any]]:
+        """Return retained revision metadata without exposing encrypted payloads."""
+        with self.connect() as database:
+            rows = database.execute(
+                "SELECT revision, saved_at, digest FROM backups ORDER BY revision DESC"
+            ).fetchall()
+        return [
+            {"revision": row["revision"], "savedAt": row["saved_at"], "digest": row["digest"]}
+            for row in rows
+        ]
+
+    def revision(self, revision: int) -> dict[str, Any] | None:
+        """Return one retained encrypted revision by its numeric identifier."""
+        with self.connect() as database:
+            row = database.execute(
+                "SELECT revision, saved_at, digest, payload FROM backups WHERE revision = ?",
+                (revision,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "revision": row["revision"],
+            "savedAt": row["saved_at"],
+            "digest": row["digest"],
+            "payload": json.loads(row["payload"]),
+        }
+
     def save(self, payload: dict[str, Any], digest: str, base_revision: int) -> tuple[dict[str, Any], bool]:
         serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         now = datetime.now(timezone.utc).isoformat()
@@ -262,6 +289,20 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET" and path == "/api/backups/latest":
                 self.require_session()
                 self.json_response(HTTPStatus.OK, {"backup": self.server.store.latest()})
+                return
+            if method == "GET" and path == "/api/backups":
+                self.require_session()
+                self.json_response(HTTPStatus.OK, {"revisions": self.server.store.revisions()})
+                return
+            if method == "GET" and path.startswith("/api/backups/"):
+                self.require_session()
+                revision_text = path.removeprefix("/api/backups/")
+                if not revision_text.isdigit():
+                    raise RequestError("La revisión solicitada es inválida.")
+                backup = self.server.store.revision(int(revision_text))
+                if not backup:
+                    raise RequestError("La revisión ya no existe.", HTTPStatus.NOT_FOUND)
+                self.json_response(HTTPStatus.OK, {"backup": backup})
                 return
             if method == "POST" and path == "/api/backups":
                 self.require_session(require_csrf=True)

@@ -1,7 +1,7 @@
 # Despliegue aditivo de sincronización privada
 
 Este procedimiento añade CodeCafe CV Sync sin reemplazar el sitio existente,
-Atlas, otros sitios, certificados ni configuraciones ajenas. La versión 1.0.1
+Atlas, otros sitios, certificados ni configuraciones ajenas. Las versiones anteriores
 permanece disponible mediante Git y el servicio nuevo puede detenerse sin
 afectar la interfaz estática.
 
@@ -33,6 +33,18 @@ La activación requiere:
 6. Copiar `deploy/cloud-config.example.json` como `cloud-config.json` y colocar
    únicamente el Client ID.
 
+Después de obtener el Client ID, el archivo puede configurarse sin editar JSON
+manualmente:
+
+```bash
+# Entra solamente al repositorio del CV que ya contiene el configurador comentado.
+cd /opt/codecafe-studio/apps/codecafe-cv-studio-source
+
+# Solicita el Client ID público, valida su formato y conserva la configuración anterior.
+# Nunca solicita la contraseña de Google ni un Client Secret.
+sudo bash deploy/configure-google-drive.sh
+```
+
 ## Validaciones realizadas antes de publicar
 
 ```bash
@@ -59,19 +71,21 @@ sudo git fetch origin main
 # En el bloque entregado junto con la publicación se utiliza su hash inmutable.
 sudo git checkout --detach origin/main
 
-# Instala exactamente las dependencias fijadas en package-lock.json.
-sudo npm ci
-
-# Comprueba TypeScript y reconstruye dist antes de tocar el sitio activo.
-sudo npm run build
+# No reconstruye dist en EC2: Node 18.19.1 no satisface el requisito de Vite 8.
+# La compilación publicada ya fue generada y validada con una versión compatible.
 
 # Ejecuta las pruebas del servicio desde la copia que se va a instalar.
 sudo python3 -m unittest discover -s server -p 'test_*.py' -v
 
-# Ejecuta el instalador comentado. Pedirá dos veces una contraseña nueva.
+# En una instalación nueva, ejecuta el instalador comentado.
+# Pedirá dos veces una contraseña de sincronización sólo si aún no existe.
 sudo bash deploy/install-cloud-sync.sh
+
+# En un servidor donde v1.1.0 ya funciona, usa únicamente el actualizador web.
+# No cambia NGINX, certificados, contraseña, API, Atlas ni otros sitios.
+sudo bash deploy/update-v1.2.0.sh
 ```
 
 El instalador conserva el `index.html` anterior, no elimina los assets de
-1.0.1, no reemplaza el certificado y revierte el archivo NGINX si `nginx -t`
+anteriores, no reemplaza el certificado y revierte el archivo NGINX si `nginx -t`
 falla. Debe detenerse ante cualquier salida inesperada.

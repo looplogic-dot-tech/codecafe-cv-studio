@@ -63,8 +63,22 @@ systemctl daemon-reload
 # Inicia CV Sync. Esta acción no reinicia ni detiene NGINX, Atlas o Docker.
 systemctl enable --now codecafe-cv-sync.service
 
+# Espera brevemente a que systemd termine de iniciar Python antes de consultar la API.
+# Este ciclo corrige la carrera observada en la instalación inicial sin ocultar fallos reales.
+health_response=""
+for attempt in {1..20}; do
+    if health_response="$(curl --fail --silent http://127.0.0.1:5002/api/health)"; then
+        break
+    fi
+    sleep 0.25
+done
+
 # Confirma que la API privada responde antes de conectarla con NGINX.
-health_response="$(curl --fail --silent --show-error http://127.0.0.1:5002/api/health)"
+if [[ -z "${health_response}" ]]; then
+    echo "DETENIDO: CodeCafe CV Sync no respondió después de cinco segundos." >&2
+    systemctl status codecafe-cv-sync.service --no-pager >&2
+    exit 1
+fi
 printf '%s\n' "${health_response}"
 if [[ "${health_response}" != *'"service":"CodeCafe CV Sync"'* ]]; then
     echo "DETENIDO: el puerto 5002 no respondió como CodeCafe CV Sync." >&2
@@ -78,13 +92,13 @@ for asset in "${source_dir}"/dist/assets/*; do
     install -m 0644 -o root -g root "${asset}" "${web_root}/assets/$(basename "${asset}")"
 done
 
-# Conserva el HTML funcional anterior antes de activar la compilación v1.1.0.
+# Conserva el HTML funcional anterior antes de activar la compilación actual.
 timestamp="$(date -u +%Y%m%d-%H%M%S)"
-index_backup="${web_root}/index.html.before-v1.1.0-${timestamp}"
+index_backup="${web_root}/index.html.before-v1.2.0-${timestamp}"
 cp --archive "${web_root}/index.html" "${index_backup}"
 
 # Sustituye únicamente index.html; los assets anteriores permanecen para rollback.
-index_temporary="$(mktemp --tmpdir="${web_root}" .index-v1.1.0.XXXXXX)"
+index_temporary="$(mktemp --tmpdir="${web_root}" .index-v1.2.0.XXXXXX)"
 install -m 0644 -o root -g root "${source_dir}/dist/index.html" "${index_temporary}"
 mv --force "${index_temporary}" "${web_root}/index.html"
 
@@ -128,4 +142,4 @@ printf '%s\n' "${public_health}"
 # Muestra las comprobaciones finales y la ubicación del rollback del HTML.
 systemctl is-active codecafe-cv-sync.service
 systemctl is-active nginx
-echo "CodeCafe CV Sync v1.1.0 instalado. Respaldo HTML: ${index_backup}"
+echo "CodeCafe CV Studio v1.2.0 instalado. Respaldo HTML: ${index_backup}"

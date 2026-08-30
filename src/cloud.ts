@@ -21,6 +21,12 @@ export type ServerBackup = {
   payload: BackupEnvelope;
 } | null;
 
+export type ServerBackupRevision = {
+  revision: number;
+  savedAt: string;
+  digest: string;
+};
+
 export type RuntimeCloudConfig = {
   googleClientId?: string;
 };
@@ -129,6 +135,16 @@ export async function disconnectServer(csrfToken: string): Promise<void> {
 
 export async function loadServerBackup(): Promise<ServerBackup> {
   const result = await api<{ backup: ServerBackup }>("/api/backups/latest");
+  return result.backup;
+}
+
+export async function listServerBackups(): Promise<ServerBackupRevision[]> {
+  const result = await api<{ revisions: ServerBackupRevision[] }>("/api/backups");
+  return result.revisions;
+}
+
+export async function loadServerBackupRevision(revision: number): Promise<ServerBackup> {
+  const result = await api<{ backup: ServerBackup }>(`/api/backups/${revision}`);
   return result.backup;
 }
 
