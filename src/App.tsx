@@ -87,8 +87,9 @@ const copy = {
     loadEc2: "Cargar desde EC2", connectDrive: "Conectar Google Drive", loadDrive: "Cargar desde Drive",
     exportBackup: "Descargar respaldo cifrado", importBackup: "Abrir respaldo cifrado", close: "Cerrar",
     localOnly: "Guardado local", connecting: "Conectando…", connected: "EC2 conectado", syncing: "Sincronizando…",
-    synced: "EC2 y nubes actualizados", syncError: "Error de sincronización", conflict: "Existe una versión más reciente",
-    driveReady: "Google Drive conectado", driveUnavailable: "Google Drive aún no está configurado",
+    synced: "Destinos conectados actualizados", syncError: "Error de sincronización", conflict: "Existe una versión más reciente",
+    driveReady: "Google Drive conectado", driveAvailable: "Listo para conectar", driveUnavailable: "Google Drive aún no está configurado",
+    passwordWarning: "Conserva esta contraseña en Bitwarden. Sin ella nadie puede descifrar los respaldos, ni siquiera el servidor.",
     cloudLoaded: "La copia seleccionada fue cargada. Pulsa Guardar para conservarla localmente.",
   },
   en: {
@@ -119,8 +120,9 @@ const copy = {
     loadEc2: "Load from EC2", connectDrive: "Connect Google Drive", loadDrive: "Load from Drive",
     exportBackup: "Download encrypted backup", importBackup: "Open encrypted backup", close: "Close",
     localOnly: "Saved locally", connecting: "Connecting…", connected: "EC2 connected", syncing: "Syncing…",
-    synced: "EC2 and clouds updated", syncError: "Synchronization error", conflict: "A newer version exists",
-    driveReady: "Google Drive connected", driveUnavailable: "Google Drive is not configured yet",
+    synced: "Connected destinations updated", syncError: "Synchronization error", conflict: "A newer version exists",
+    driveReady: "Google Drive connected", driveAvailable: "Ready to connect", driveUnavailable: "Google Drive is not configured yet",
+    passwordWarning: "Keep this password in Bitwarden. Without it, nobody can decrypt the backups, including the server.",
     cloudLoaded: "The selected copy was loaded. Press Save to keep it locally.",
   },
 } as const;
@@ -414,7 +416,7 @@ export default function Home() {
         <section className="cloudPanel" role="dialog" aria-modal="true" aria-labelledby="cloud-title">
           <div className="cloudHead"><div><span className="eyebrow">CODECAFE CLOUD</span><h2 id="cloud-title">{t.cloudTitle}</h2></div><button onClick={() => setCloudOpen(false)} aria-label={t.close}>×</button></div>
           <p className="cloudIntro">{t.cloudIntro}</p>
-          <label>{t.syncPassword}<input className={inputClass} type="password" autoComplete="current-password" value={syncPassword} onChange={(event) => setSyncPassword(event.target.value)} /></label>
+          <label>{t.syncPassword}<input className={inputClass} type="password" autoComplete="current-password" value={syncPassword} onChange={(event) => setSyncPassword(event.target.value)} /><small className="hint">{t.passwordWarning}</small></label>
           <div className="cloudProvider">
             <div><b>Amazon EC2</b><span>{serverSession ? `${t.connected} · revisión ${serverRevision}` : t.localOnly}</span></div>
             <div className="cloudActions">{serverSession
@@ -423,7 +425,7 @@ export default function Home() {
             </div>
           </div>
           <div className="cloudProvider">
-            <div><b>Google Drive</b><span>{googleToken ? t.driveReady : cloudConfig.googleClientId ? t.cloud : t.driveUnavailable}</span></div>
+            <div><b>Google Drive</b><span>{googleToken ? t.driveReady : cloudConfig.googleClientId ? t.driveAvailable : t.driveUnavailable}</span></div>
             <div className="cloudActions">{googleToken
               ? <button onClick={restoreDrive}>{t.loadDrive}</button>
               : <button disabled={!cloudConfig.googleClientId || !syncPassword} onClick={connectDrive}>{t.connectDrive}</button>}

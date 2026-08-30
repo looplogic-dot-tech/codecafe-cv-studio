@@ -46,6 +46,32 @@ python3 -m unittest discover -s server -p 'test_*.py' -v
 python3 -m py_compile server/app.py
 ```
 
-La instalación final en EC2 debe ejecutarse por etapas y detenerse ante
-cualquier salida inesperada. No se incluye un reemplazo automático del archivo
-NGINX porque Certbot ya administra el bloque HTTPS existente.
+## Instalación desde el repositorio ya existente en EC2
+
+```bash
+# Entra al repositorio exclusivo del CV; no entra ni modifica la ruta de Atlas.
+cd /opt/codecafe-studio/apps/codecafe-cv-studio-source
+
+# Descarga la versión publicada sin cambiar todavía los archivos del sitio activo.
+sudo git fetch origin main
+
+# Selecciona la versión 1.1.0 recién publicada en la rama remota.
+# En el bloque entregado junto con la publicación se utiliza su hash inmutable.
+sudo git checkout --detach origin/main
+
+# Instala exactamente las dependencias fijadas en package-lock.json.
+sudo npm ci
+
+# Comprueba TypeScript y reconstruye dist antes de tocar el sitio activo.
+sudo npm run build
+
+# Ejecuta las pruebas del servicio desde la copia que se va a instalar.
+sudo python3 -m unittest discover -s server -p 'test_*.py' -v
+
+# Ejecuta el instalador comentado. Pedirá dos veces una contraseña nueva.
+sudo bash deploy/install-cloud-sync.sh
+```
+
+El instalador conserva el `index.html` anterior, no elimina los assets de
+1.0.1, no reemplaza el certificado y revierte el archivo NGINX si `nginx -t`
+falla. Debe detenerse ante cualquier salida inesperada.
