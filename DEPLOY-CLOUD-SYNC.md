@@ -82,7 +82,8 @@ sudo python3 -m unittest discover -s server -p 'test_*.py' -v
 sudo bash deploy/install-cloud-sync.sh
 
 # En un servidor donde v1.1.0 ya funciona, usa únicamente el actualizador web.
-# No cambia NGINX, certificados, contraseña, API, Atlas ni otros sitios.
+# No cambia NGINX, certificados, contraseña, Atlas ni otros sitios.
+# Reinicia solamente CV Sync para cargar la consulta nueva de historial.
 sudo bash deploy/update-v1.2.0.sh
 ```
 

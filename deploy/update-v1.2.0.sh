@@ -6,6 +6,8 @@ set -euo pipefail
 # Declara únicamente las rutas exclusivas de CodeCafe CV Studio.
 source_dir="/opt/codecafe-studio/apps/codecafe-cv-studio-source"
 web_root="/opt/codecafe-studio/apps/codecafe-cv-studio"
+server_program="${source_dir}/server/app.py"
+previous_commit="c49bad77d059508f7bf9ddf51d279cdfc3aaebf3"
 
 # Evita modificar archivos si el bloque no fue ejecutado mediante sudo.
 if [[ "${EUID}" -ne 0 ]]; then
@@ -18,6 +20,7 @@ for required in \
     "${source_dir}/dist/index.html" \
     "${source_dir}/dist/assets" \
     "${source_dir}/package.json" \
+    "${server_program}" \
     "${web_root}/index.html"; do
     if [[ ! -e "${required}" ]]; then
         echo "DETENIDO: falta el recurso esperado ${required}" >&2
@@ -28,8 +31,35 @@ done
 # Comprueba que el repositorio seleccionado declara exactamente la versión esperada.
 python3 -c 'import json; assert json.load(open("/opt/codecafe-studio/apps/codecafe-cv-studio-source/package.json"))["version"] == "1.2.0"'
 
-# Crea un respaldo recuperable del HTML que actualmente mantiene el sitio funcionando.
+# Recupera desde Git el programa Python de la versión funcional v1.1.0.
+# Se conserva fuera del nombre activo para poder restaurarlo si el reinicio falla.
 timestamp="$(date -u +%Y%m%d-%H%M%S)"
+server_backup="${source_dir}/server/app.py.before-v1.2.0-${timestamp}"
+git -C "${source_dir}" show "${previous_commit}:server/app.py" > "${server_backup}"
+chmod 0644 "${server_backup}"
+
+# Reinicia solamente CV Sync para cargar los endpoints nuevos de historial.
+# No reinicia NGINX, Docker, Atlas ni ningún otro sitio.
+systemctl restart codecafe-cv-sync.service
+
+# Espera hasta cinco segundos para que el programa Python abra el puerto 5002.
+health_response=""
+for attempt in {1..20}; do
+    if health_response="$(curl --fail --silent http://127.0.0.1:5002/api/health)"; then
+        break
+    fi
+    sleep 0.25
+done
+
+# Restaura automáticamente el programa anterior si la API nueva no inicia.
+if [[ "${health_response}" != *'"service":"CodeCafe CV Sync"'* ]]; then
+    install -m 0644 -o root -g root "${server_backup}" "${server_program}"
+    systemctl restart codecafe-cv-sync.service
+    echo "DETENIDO: CV Sync no inició; el programa Python anterior fue restaurado." >&2
+    exit 1
+fi
+
+# Crea un respaldo recuperable del HTML que actualmente mantiene el sitio funcionando.
 index_backup="${web_root}/index.html.before-v1.2.0-${timestamp}"
 cp --archive "${web_root}/index.html" "${index_backup}"
 
@@ -73,9 +103,10 @@ if ! curl --fail --silent --show-error \
     exit 1
 fi
 
-# Confirma que tanto NGINX como la sincronización siguen activos sin reiniciarlos.
+# Confirma que NGINX continúa activo y que CV Sync terminó su reinicio controlado.
 systemctl is-active nginx
 systemctl is-active codecafe-cv-sync.service
 
 # Imprime la ruta exacta que permite regresar manualmente al HTML anterior.
-echo "CodeCafe CV Studio v1.2.0 activo. Respaldo anterior: ${index_backup}"
+echo "CodeCafe CV Studio v1.2.0 activo. Respaldo HTML: ${index_backup}"
+echo "Programa Python anterior: ${server_backup}"

@@ -111,8 +111,12 @@ El actualizador imprime una ruta similar a:
 
 `/opt/codecafe-studio/apps/codecafe-cv-studio/index.html.before-v1.2.0-FECHA`
 
-Los assets anteriores no se borran. Para regresar, se copia ese archivo sobre
-`index.html`; no hace falta modificar NGINX, Python, Atlas ni certificados.
+Los assets anteriores no se borran. Para regresar la interfaz, se copia ese
+archivo sobre `index.html`; no hace falta modificar NGINX, Atlas ni certificados.
+
+El actualizador reinicia únicamente `codecafe-cv-sync.service` para cargar los
+endpoints del historial. Antes crea `server/app.py.before-v1.2.0-FECHA`; si la
+API no responde, restaura ese programa y vuelve a iniciar solamente CV Sync.
 
 ## Google Drive pendiente de configuración externa
 
