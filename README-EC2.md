@@ -3,7 +3,7 @@
 La interfaz continúa siendo estática y NGINX sirve sus archivos directamente.
 Desde la versión 1.1.0 existe un servicio de sincronización **opcional**,
 separado, que escucha únicamente en `127.0.0.1:5002` y guarda hasta 20 copias
-cifradas. No usa Docker ni modifica la base de datos de Atlas.
+legibles con acceso autenticado. No usa Docker ni modifica la base de datos de Atlas.
 
 ## Separación obligatoria
 
@@ -12,7 +12,7 @@ cifradas. No usa Docker ni modifica la base de datos de Atlas.
 - Atlas Web permanece en /opt/codecafe-studio/apps/codecafe-atlas-web
 - Atlas Web permanece en 127.0.0.1:5001
 - CV Sync utiliza exclusivamente 127.0.0.1:5002
-- Los datos cifrados utilizan /opt/codecafe-studio/data/codecafe-cv-studio
+- Los datos privados utilizan /opt/codecafe-studio/data/codecafe-cv-studio
 - No se modifica, reemplaza ni elimina ningún sitio, contenedor, volumen,
   configuración o certificado existente.
 

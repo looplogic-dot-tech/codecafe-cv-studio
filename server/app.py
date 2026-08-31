@@ -61,6 +61,7 @@ class Store:
         self.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.data_dir, 0o700)
         self.database_path = self.data_dir / "backups.sqlite3"
+        # Se conserva la sal heredada únicamente para poder abrir respaldos cifrados antiguos.
         self.salt_path = self.data_dir / "encryption-salt"
         self._initialize()
 
@@ -105,7 +106,7 @@ class Store:
         }
 
     def revisions(self) -> list[dict[str, Any]]:
-        """Return retained revision metadata without exposing encrypted payloads."""
+        """Devuelve metadatos de revisiones sin incluir el contenido del CV."""
         with self.connect() as database:
             rows = database.execute(
                 "SELECT revision, saved_at, digest FROM backups ORDER BY revision DESC"
@@ -116,7 +117,7 @@ class Store:
         ]
 
     def revision(self, revision: int) -> dict[str, Any] | None:
-        """Return one retained encrypted revision by its numeric identifier."""
+        """Devuelve una revisión retenida por su identificador numérico."""
         with self.connect() as database:
             row = database.execute(
                 "SELECT revision, saved_at, digest, payload FROM backups WHERE revision = ?",
@@ -346,11 +347,12 @@ class Handler(BaseHTTPRequestHandler):
         payload = body.get("payload")
         digest = body.get("digest")
         base_revision = body.get("baseRevision")
-        if not isinstance(payload, dict) or payload.get("version") != 1:
-            raise RequestError("El respaldo cifrado es inválido.")
-        required = ("algorithm", "kdf", "iterations", "salt", "iv", "ciphertext")
-        if any(key not in payload for key in required):
-            raise RequestError("El respaldo cifrado está incompleto.")
+        if not isinstance(payload, dict):
+            raise RequestError("El respaldo debe ser un objeto JSON.")
+        is_plain_workspace = payload.get("schema") in (1, 2)
+        is_legacy_encrypted = payload.get("version") == 1 and payload.get("algorithm") == "AES-GCM"
+        if not is_plain_workspace and not is_legacy_encrypted:
+            raise RequestError("El respaldo no corresponde a CodeCafe CV Studio.")
         if not isinstance(digest, str) or len(digest) != 64:
             raise RequestError("La huella SHA-256 es inválida.")
         if not isinstance(base_revision, int) or base_revision < 0:

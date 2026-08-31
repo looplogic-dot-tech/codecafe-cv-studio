@@ -23,6 +23,14 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("schema: 2", app)
         self.assertIn("isWorkspace(backup.workspace)", app)
 
+    def test_new_cloud_copies_are_plain_and_drive_receives_pdf(self):
+        app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+        cloud = (ROOT / "src" / "cloud.ts").read_text(encoding="utf-8")
+        self.assertIn("saveServerBackup(document, digest", app)
+        self.assertNotIn("saveServerBackup(envelope, digest", app)
+        self.assertIn('mimeType=${encodeURIComponent("application/pdf")}', cloud)
+        self.assertIn("Drive recibe datos normales", cloud)
+
     def test_native_writing_assistance_and_custom_sections_remain_enabled(self):
         app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
         self.assertIn("spellCheck={true}", app)

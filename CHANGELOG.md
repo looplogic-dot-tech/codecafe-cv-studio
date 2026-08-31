@@ -1,5 +1,17 @@
 # Historial de versiones
 
+## 1.3.0 — 2026-08-31
+
+- Conserva íntegro el editor, la interfaz móvil y la biblioteca de CVs de v1.2.0.
+- Guarda las nuevas revisiones de EC2 como JSON legible, protegido por autenticación pero sin cifrado de contenido.
+- Guarda en Google Drive un espacio de trabajo JSON normal, un documento de Google y un PDF imprimible sin cifrar.
+- Organiza los documentos y PDFs de Drive dentro de `CodeCafe CV Studio/<colección>`.
+- Permite conectar Google Drive sin escribir la contraseña de EC2.
+- Reutiliza temporalmente la autorización válida de Google y evita solicitar consentimiento en cada apertura.
+- Delega a Google las comprobaciones de seguridad por dispositivo o ubicación inusual.
+- Mantiene lectura retrocompatible de las revisiones AES-GCM creadas por versiones anteriores.
+- Conserva el límite de 20 revisiones en EC2 y el máximo de 20 CVs en la biblioteca.
+
 ## 1.2.0 — 2026-08-30
 
 - Añade una biblioteca visual y adaptable a teléfono para organizar hasta 20 CVs.
@@ -9,7 +21,7 @@
 - Añade secciones personalizadas para adaptar el contenido a empleos no técnicos sin eliminar los campos IT opcionales.
 - Activa la revisión ortográfica y gramatical nativa del navegador según el idioma ES/EN.
 - Migra automáticamente el único CV local de v1.1.0 a la nueva biblioteca sin borrar sus datos.
-- Amplía el respaldo cifrado para incluir documentos, colecciones y configuración en un solo archivo.
+- Amplía el respaldo para incluir documentos, colecciones y configuración en un solo archivo.
 - Conserva un límite global de 20 respaldos históricos en EC2 y actualiza un solo archivo en Google Drive.
 - Añade un selector visible para abrir cualquiera de las revisiones todavía retenidas en EC2.
 - Añade un diario técnico y un actualizador aditivo con validación y rollback.

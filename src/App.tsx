@@ -8,12 +8,13 @@ import {
   connectServer,
   decryptBackup,
   disconnectServer,
-  encryptBackup,
   loadGoogleBackup,
+  loadStoredGoogleToken,
   listServerBackups,
   loadRuntimeCloudConfig,
   loadServerBackup,
   loadServerBackupRevision,
+  GooglePrintableCV,
   RuntimeCloudConfig,
   saveGoogleBackup,
   saveServerBackup,
@@ -110,14 +111,15 @@ const copy = {
     certificationsHeading: "Certificaciones", educationHeading: "Educación", languagesHeading: "Idiomas",
     atsGood: "Lectura ATS optimizada", atsDetail: "Encabezados estándar · Texto seleccionable · Sin tablas complejas",
     docLanguage: "Idioma del CV", optional: "Opcional: las secciones vacías no se imprimen",
-    cloud: "Copias en la nube", cloudTitle: "Sincronización privada", cloudIntro: "Tu copia local siempre se conserva. EC2 y Google Drive reciben únicamente respaldos cifrados.",
-    syncPassword: "Contraseña de sincronización", connectEc2: "Conectar EC2", disconnect: "Desconectar",
+    cloud: "Copias en la nube", cloudTitle: "Sincronización en la nube", cloudIntro: "Tu copia local siempre se conserva. EC2 mantiene su historial protegido; Google Drive recibe archivos normales y legibles.",
+    syncPassword: "Contraseña de EC2", connectEc2: "Conectar EC2", disconnect: "Desconectar",
     loadEc2: "Cargar desde EC2", connectDrive: "Conectar Google Drive", loadDrive: "Cargar desde Drive",
-    exportBackup: "Descargar respaldo cifrado", importBackup: "Abrir respaldo cifrado", close: "Cerrar",
+    exportBackup: "Descargar respaldo", importBackup: "Abrir respaldo", close: "Cerrar",
     localOnly: "Guardado local", connecting: "Conectando…", connected: "EC2 conectado", syncing: "Sincronizando…",
     synced: "Destinos conectados actualizados", syncError: "Error de sincronización", conflict: "Existe una versión más reciente",
     driveReady: "Google Drive conectado", driveAvailable: "Listo para conectar", driveUnavailable: "Google Drive aún no está configurado",
-    passwordWarning: "Conserva esta contraseña en Bitwarden. Sin ella nadie puede descifrar los respaldos, ni siquiera el servidor.",
+    passwordWarning: "Esta contraseña se utiliza solamente para el historial privado de EC2; Google Drive no la necesita.",
+    driveFiles: "Guarda el espacio de trabajo, un documento y un PDF sin cifrar en la carpeta correspondiente.",
     cloudLoaded: "La copia seleccionada fue cargada. Pulsa Guardar para conservarla localmente.",
     myCvs: "Mis CVs", writingActive: "Asistencia de escritura activa",
     writingDetail: "El navegador revisa ortografía y gramática según el idioma ES/EN, sin enviar el CV a otro servicio.",
@@ -148,14 +150,15 @@ const copy = {
     certificationsHeading: "Certifications", educationHeading: "Education", languagesHeading: "Languages",
     atsGood: "ATS-friendly structure", atsDetail: "Standard headings · Selectable text · No complex tables",
     docLanguage: "Résumé language", optional: "Optional: empty sections are not printed",
-    cloud: "Cloud copies", cloudTitle: "Private synchronization", cloudIntro: "Your local copy is always preserved. EC2 and Google Drive receive encrypted backups only.",
-    syncPassword: "Sync password", connectEc2: "Connect EC2", disconnect: "Disconnect",
+    cloud: "Cloud copies", cloudTitle: "Cloud synchronization", cloudIntro: "Your local copy is always preserved. EC2 keeps its protected history; Google Drive receives normal, readable files.",
+    syncPassword: "EC2 password", connectEc2: "Connect EC2", disconnect: "Disconnect",
     loadEc2: "Load from EC2", connectDrive: "Connect Google Drive", loadDrive: "Load from Drive",
-    exportBackup: "Download encrypted backup", importBackup: "Open encrypted backup", close: "Close",
+    exportBackup: "Download backup", importBackup: "Open backup", close: "Close",
     localOnly: "Saved locally", connecting: "Connecting…", connected: "EC2 connected", syncing: "Syncing…",
     synced: "Connected destinations updated", syncError: "Synchronization error", conflict: "A newer version exists",
     driveReady: "Google Drive connected", driveAvailable: "Ready to connect", driveUnavailable: "Google Drive is not configured yet",
-    passwordWarning: "Keep this password in Bitwarden. Without it, nobody can decrypt the backups, including the server.",
+    passwordWarning: "This password is used only for the private EC2 history; Google Drive does not need it.",
+    driveFiles: "Saves the workspace, a document and an unencrypted PDF inside the matching folder.",
     cloudLoaded: "The selected copy was loaded. Press Save to keep it locally.",
     myCvs: "My CVs", writingActive: "Writing assistance active",
     writingDetail: "Your browser checks spelling and grammar for the selected ES/EN language without sending the CV to another service.",
@@ -164,6 +167,51 @@ const copy = {
     sectionContent: "Content", addCustomSection: "＋ Add custom section",
   },
 } as const;
+
+function isEncryptedEnvelope(value: unknown): value is BackupEnvelope {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<BackupEnvelope>;
+  return candidate.version === 1 && candidate.algorithm === "AES-GCM" && typeof candidate.ciphertext === "string";
+}
+
+function safeFileName(value: string): string {
+  return value.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim().slice(0, 100) || "CV";
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[character] || character));
+}
+
+function htmlLines(value: string): string {
+  return value.split("\n").filter(Boolean).map((line) => `<p>${escapeHtml(line)}</p>`).join("");
+}
+
+// Genera únicamente la copia portátil para Drive; la interfaz React funcional no se reconstruye.
+function buildPrintableHtml(cv: CV, lang: Lang, labels: (typeof copy)[Lang]): string {
+  const section = (title: string, body: string) => body ? `<section><h2>${escapeHtml(title)}</h2>${body}</section>` : "";
+  const jobs = cv.jobs.filter((job) => job.role || job.company || job.bullets).map((job) => `
+    <div class="entry"><h3>${escapeHtml(job.role)} — ${escapeHtml(job.company)}</h3><time>${escapeHtml(job.dates)}</time>
+    <ul>${job.bullets.split("\n").filter(Boolean).map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul></div>`).join("");
+  const projects = cv.projects.filter((project) => project.name || project.description).map((project) => `
+    <div class="entry"><h3>${escapeHtml(project.name)}</h3><strong>${escapeHtml(project.stack)}</strong><p>${escapeHtml(project.description)}</p></div>`).join("");
+  const custom = cv.customSections.filter((item) => item.title || item.content)
+    .map((item) => section(item.title || labels.customSection, htmlLines(item.content))).join("");
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${escapeHtml(cv.name || "CV")}</title>
+  <style>@page{size:A4;margin:18mm}body{font-family:Arial,sans-serif;color:#172033;font-size:10.5pt;line-height:1.42;max-width:178mm;margin:auto}header{border-bottom:3px solid #3157a4;padding-bottom:10px}h1{font-size:25pt;margin:0;color:#193467}header h2{border:0;margin:3px 0;font-size:14pt}header p{margin:3px 0}section{margin-top:14px}section h2{font-size:11pt;letter-spacing:.08em;text-transform:uppercase;color:#3157a4;border-bottom:1px solid #cbd5e1;padding-bottom:3px}p{margin:4px 0}.entry{break-inside:avoid;margin:8px 0}.entry h3{font-size:10.5pt;margin:0}.entry time{color:#526071}ul{margin:4px 0 0 18px;padding:0}li{margin:2px 0}</style></head><body>
+  <header><h1>${escapeHtml(cv.name)}</h1><h2>${escapeHtml(cv.title)}</h2><p>${[cv.email, cv.phone, cv.location].filter(Boolean).map(escapeHtml).join(" · ")}</p>${cv.linkedin ? `<p>${escapeHtml(cv.linkedin)}</p>` : ""}</header>
+  ${section(labels.profileHeading, cv.summary ? `<p>${escapeHtml(cv.summary)}</p>` : "")}
+  ${section(labels.experienceHeading, jobs)}
+  ${section(labels.coreHeading, cv.coreSkills ? `<p>${escapeHtml(cv.coreSkills)}</p>` : "")}
+  ${section(labels.toolsHeading, cv.tools ? `<p>${escapeHtml(cv.tools)}</p>` : "")}
+  ${section(labels.projectsHeading, projects)}
+  ${section(labels.certificationsHeading, htmlLines(cv.certifications))}${custom}
+  ${section(labels.skillsHeading, cv.skills ? `<p>${escapeHtml(cv.skills)}</p>` : "")}
+  ${section(labels.educationHeading, htmlLines(cv.education))}
+  ${section(labels.languagesHeading, htmlLines(cv.languages))}
+  </body></html>`;
+}
 
 const inputClass = "inputField";
 
@@ -230,6 +278,7 @@ export default function Home() {
 
   useEffect(() => {
     loadRuntimeCloudConfig().then(setCloudConfig);
+    setGoogleToken(loadStoredGoogleToken());
   }, []);
 
   const score = useMemo(() => {
@@ -243,6 +292,17 @@ export default function Home() {
   const setCustomSection = (i: number, key: keyof CustomSection, value: string) => setCV((v) => ({ ...v, customSections: v.customSections.map((section, n) => n === i ? { ...section, [key]: value } : section) }));
   const workspaceWithCurrent = () => replaceCurrentDocument(workspace, cv, { lang, template, photoOn });
   const backupDocument = (): BackupDocument => ({ schema: 2, savedAt: new Date().toISOString(), workspace: workspaceWithCurrent() });
+  const googlePrintable = (): GooglePrintableCV => {
+    const currentWorkspace = workspaceWithCurrent();
+    const document = activeDocument(currentWorkspace);
+    const collection = currentWorkspace.collections.find((candidate) => candidate.id === document.collectionId);
+    return {
+      documentId: document.id,
+      collectionName: collection?.name || "General Purpose",
+      fileBaseName: safeFileName(document.name || cv.name || "CV"),
+      html: buildPrintableHtml(cv, lang, t),
+    };
+  };
   const saveLocal = () => {
     const updatedWorkspace = workspaceWithCurrent();
     setWorkspace(updatedWorkspace);
@@ -272,19 +332,19 @@ export default function Home() {
     setCloudMessage(t.cloudLoaded);
   };
   const syncCloud = async () => {
-    if (!syncPassword || (!serverSession && !googleToken)) return;
+    if ((!serverSession && !googleToken) || (serverSession && !syncPassword)) return;
     setCloudStatus("syncing");
     setCloudMessage("");
     try {
-      const envelope = await encryptBackup(backupDocument(), syncPassword, serverSession?.encryptionSalt);
       if (serverSession) {
-        const digest = await backupDigest(envelope);
-        const result = await saveServerBackup(envelope, digest, serverRevision, serverSession.csrfToken);
+        const document = backupDocument();
+        const digest = await backupDigest(document);
+        const result = await saveServerBackup(document, digest, serverRevision, serverSession.csrfToken);
         setServerRevision(result.revision);
         setSelectedRevision(result.revision);
         setServerHistory(await listServerBackups());
       }
-      if (googleToken) await saveGoogleBackup(googleToken, envelope);
+      if (googleToken) await saveGoogleBackup(googleToken, backupDocument(), googlePrintable());
       setCloudStatus("synced");
     } catch (error) {
       const failure = error as Error & { status?: number };
@@ -325,7 +385,10 @@ export default function Home() {
     try {
       const backup = await loadServerBackup();
       if (!backup) throw new Error("EC2 todavía no contiene respaldos.");
-      applyBackup(await decryptBackup<BackupDocument>(backup.payload, syncPassword));
+      const document = isEncryptedEnvelope(backup.payload)
+        ? await decryptBackup<BackupDocument>(backup.payload, syncPassword)
+        : backup.payload as BackupDocument;
+      applyBackup(document);
       setServerRevision(backup.revision);
       setCloudStatus("connected");
     } catch (error) {
@@ -338,7 +401,10 @@ export default function Home() {
     try {
       const backup = await loadServerBackupRevision(selectedRevision);
       if (!backup) throw new Error("La revisión seleccionada ya no existe.");
-      applyBackup(await decryptBackup<BackupDocument>(backup.payload, syncPassword));
+      const document = isEncryptedEnvelope(backup.payload)
+        ? await decryptBackup<BackupDocument>(backup.payload, syncPassword)
+        : backup.payload as BackupDocument;
+      applyBackup(document);
       setCloudStatus("connected");
     } catch (error) {
       setCloudStatus("error");
@@ -356,31 +422,32 @@ export default function Home() {
     }
   };
   const restoreDrive = async () => {
-    if (!googleToken || !syncPassword) return;
+    if (!googleToken) return;
     try {
-      const backup = await loadGoogleBackup(googleToken);
+      const backup = await loadGoogleBackup<BackupDocument>(googleToken);
       if (!backup) throw new Error("Google Drive todavía no contiene respaldos.");
-      applyBackup(await decryptBackup<BackupDocument>(backup, syncPassword));
+      applyBackup(backup);
     } catch (error) {
       setCloudStatus("error");
       setCloudMessage((error as Error).message);
     }
   };
-  const exportEncryptedBackup = async () => {
-    if (!syncPassword) return;
-    const envelope = await encryptBackup(backupDocument(), syncPassword, serverSession?.encryptionSalt);
+  const exportBackup = () => {
     const anchor = document.createElement("a");
-    anchor.href = URL.createObjectURL(new Blob([JSON.stringify(envelope, null, 2)], { type: "application/json" }));
+    anchor.href = URL.createObjectURL(new Blob([JSON.stringify(backupDocument(), null, 2)], { type: "application/json" }));
     anchor.download = `CodeCafe-CV-${new Date().toISOString().slice(0, 10)}.backup.json`;
     anchor.click();
     URL.revokeObjectURL(anchor.href);
   };
-  const importEncryptedBackup = async (event: ChangeEvent<HTMLInputElement>) => {
+  const importBackup = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !syncPassword) return;
+    if (!file) return;
     try {
-      const envelope = JSON.parse(await file.text()) as BackupEnvelope;
-      applyBackup(await decryptBackup<BackupDocument>(envelope, syncPassword));
+      const value = JSON.parse(await file.text()) as BackupDocument | BackupEnvelope;
+      const document = isEncryptedEnvelope(value)
+        ? await decryptBackup<BackupDocument>(value, syncPassword)
+        : value;
+      applyBackup(document);
     } catch (error) {
       setCloudStatus("error");
       setCloudMessage((error as Error).message);
@@ -676,13 +743,13 @@ export default function Home() {
             <button onClick={restoreEc2Revision}>{t.loadRevision}</button>
           </div>}
           <div className="cloudProvider">
-            <div><b>Google Drive</b><span>{googleToken ? t.driveReady : cloudConfig.googleClientId ? t.driveAvailable : t.driveUnavailable}</span></div>
+            <div><b>Google Drive</b><span>{googleToken ? t.driveReady : cloudConfig.googleClientId ? t.driveAvailable : t.driveUnavailable}</span><small className="hint">{t.driveFiles}</small></div>
             <div className="cloudActions">{googleToken
               ? <button onClick={restoreDrive}>{t.loadDrive}</button>
-              : <button disabled={!cloudConfig.googleClientId || !syncPassword} onClick={connectDrive}>{t.connectDrive}</button>}
+              : <button disabled={!cloudConfig.googleClientId} onClick={connectDrive}>{t.connectDrive}</button>}
             </div>
           </div>
-          <div className="cloudPortable"><button onClick={exportEncryptedBackup} disabled={!syncPassword}>{t.exportBackup}</button><label className={!syncPassword ? "disabled" : ""}>{t.importBackup}<input type="file" accept="application/json,.json" disabled={!syncPassword} onChange={importEncryptedBackup} /></label></div>
+          <div className="cloudPortable"><button onClick={exportBackup}>{t.exportBackup}</button><label>{t.importBackup}<input type="file" accept="application/json,.json" onChange={importBackup} /></label></div>
           <div className={`cloudNotice ${cloudStatus}`}>{cloudStatusText}{cloudMessage && <small>{cloudMessage}</small>}</div>
           <button className="cloudClose" onClick={() => setCloudOpen(false)}>{t.close}</button>
         </section>

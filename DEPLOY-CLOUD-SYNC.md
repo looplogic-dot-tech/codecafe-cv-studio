@@ -1,4 +1,4 @@
-# Despliegue aditivo de sincronización privada
+# Despliegue aditivo de sincronización
 
 Este procedimiento añade CodeCafe CV Sync sin reemplazar el sitio existente,
 Atlas, otros sitios, certificados ni configuraciones ajenas. Las versiones anteriores
@@ -11,7 +11,7 @@ afectar la interfaz estática.
 |---|---|
 | `127.0.0.1:5002` | API privada de CV Sync |
 | `codecafe-cv` | Usuario Linux sin inicio de sesión |
-| `/opt/codecafe-studio/data/codecafe-cv-studio` | Base cifrada y salt persistente |
+| `/opt/codecafe-studio/data/codecafe-cv-studio` | Base privada con máximo de 20 revisiones |
 | `/etc/codecafe-cv-sync.env` | Hash de contraseña y configuración |
 | `/etc/systemd/system/codecafe-cv-sync.service` | Servicio independiente |
 
@@ -22,6 +22,10 @@ Atlas conserva `127.0.0.1:5001` y su directorio actual.
 El conector está implementado, pero permanece desactivado mientras no exista
 `cloud-config.json`. El identificador OAuth es público por diseño; nunca se
 debe colocar un client secret en el navegador o en ese archivo.
+
+Google Drive recibe archivos sin cifrar: un JSON para recuperar el editor, un
+documento de Google y un PDF imprimible. Se organizan dentro de la carpeta
+`CodeCafe CV Studio` y una subcarpeta con el nombre de la colección del CV.
 
 La activación requiere:
 
@@ -51,7 +55,7 @@ sudo bash deploy/configure-google-drive.sh
 # Verifica TypeScript y genera los archivos estáticos de producción.
 npm run build
 
-# Ejecuta las pruebas de contraseña, versiones, retención y conflictos.
+# Ejecuta las pruebas de acceso, versiones, retención y conflictos.
 python3 -m unittest discover -s server -p 'test_*.py' -v
 
 # Comprueba la sintaxis del servidor sin iniciarlo.
@@ -84,7 +88,7 @@ sudo bash deploy/install-cloud-sync.sh
 # En un servidor donde v1.1.0 ya funciona, usa únicamente el actualizador web.
 # No cambia NGINX, certificados, contraseña, Atlas ni otros sitios.
 # Reinicia solamente CV Sync para cargar la consulta nueva de historial.
-sudo bash deploy/update-v1.2.0.sh
+sudo bash deploy/update-v1.3.0.sh
 ```
 
 El instalador conserva el `index.html` anterior, no elimina los assets de

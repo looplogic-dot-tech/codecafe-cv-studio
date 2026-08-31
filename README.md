@@ -15,8 +15,8 @@ persona real y debe reemplazarse con la información de cada usuario.
 - Experiencias laborales ilimitadas.
 - Core Skills, herramientas, certificaciones y proyectos opcionales.
 - Guardado local en el navegador.
-- Copias cifradas y versionadas en EC2, sin sustituir el guardado local.
-- Respaldo cifrado importable y exportable.
+- Copias legibles y versionadas en EC2, sin sustituir el guardado local.
+- Respaldo JSON importable y exportable.
 - Conector opcional de Google Drive con permiso limitado `drive.file`.
 - Impresión o exportación a PDF en tamaño A4.
 - Exportación de texto compatible con ATS.
@@ -50,12 +50,12 @@ npm run build
 - Ruta aislada: `/opt/codecafe-studio/apps/codecafe-cv-studio`
 - Interfaz: archivos estáticos servidos directamente por NGINX.
 - Sincronización opcional: API Python aislada en `127.0.0.1:5002`.
-- Datos: SQLite cifrado desde el navegador, separado de Atlas.
+- Datos: SQLite privado con autenticación y 20 revisiones, separado de Atlas.
 
 La API utiliza únicamente la biblioteca estándar de Python; no usa Flask ni
-otro framework web. El CV se cifra en
-el navegador mediante AES-GCM antes de salir del dispositivo. La contraseña no
-se guarda en el navegador ni se publica en GitHub.
+otro framework web. La contraseña controla el acceso a la API de EC2, pero los
+nuevos respaldos permanecen legibles. Google Drive recibe un JSON de trabajo,
+un documento y un PDF normales para poder abrirlos e imprimirlos desde el teléfono.
 
 Consulta [MIGRATION_POLICY.md](MIGRATION_POLICY.md) antes de modificar el
 proyecto y [DEPLOY-CLOUD-SYNC.md](DEPLOY-CLOUD-SYNC.md) antes de instalar la
@@ -63,6 +63,8 @@ sincronización en EC2.
 
 El registro permanente de decisiones, comandos y validaciones de v1.2.0 está
 en [docs/IMPLEMENTATION-JOURNAL-v1.2.0.md](docs/IMPLEMENTATION-JOURNAL-v1.2.0.md).
+La transición a copias legibles y Google Drive está documentada en
+[docs/IMPLEMENTATION-JOURNAL-v1.3.0.md](docs/IMPLEMENTATION-JOURNAL-v1.3.0.md).
 
 ## Autor
 

@@ -23,13 +23,9 @@ class StoreTests(unittest.TestCase):
 
     def payload(self, value):
         return {
-            "version": 1,
-            "algorithm": "AES-GCM",
-            "kdf": "PBKDF2-SHA256",
-            "iterations": 250000,
-            "salt": "salt",
-            "iv": "iv",
-            "ciphertext": value,
+            "schema": 2,
+            "savedAt": "2026-08-31T00:00:00+00:00",
+            "workspace": {"value": value},
         }
 
     def test_versioning_deduplication_and_retention(self):
@@ -40,12 +36,12 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(first["revision"], repeated["revision"])
         second, _ = self.store.save(self.payload("two"), "2" * 64, first["revision"])
         third, _ = self.store.save(self.payload("three"), "3" * 64, second["revision"])
-        self.assertEqual("three", self.store.latest()["payload"]["ciphertext"])
+        self.assertEqual("three", self.store.latest()["payload"]["workspace"]["value"])
         with self.store.connect() as database:
             self.assertEqual(2, database.execute("SELECT COUNT(*) FROM backups").fetchone()[0])
         self.assertGreater(third["revision"], second["revision"])
         self.assertEqual([third["revision"], second["revision"]], [item["revision"] for item in self.store.revisions()])
-        self.assertEqual("two", self.store.revision(second["revision"])["payload"]["ciphertext"])
+        self.assertEqual("two", self.store.revision(second["revision"])["payload"]["workspace"]["value"])
         self.assertIsNone(self.store.revision(first["revision"]))
 
     def test_conflict_does_not_overwrite(self):
