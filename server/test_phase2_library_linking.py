@@ -26,6 +26,23 @@ class Phase2LibraryLinkingTests(unittest.TestCase):
         self.assertIn('if (!next[field]?.trim() && basicInfo[field]?.trim())', workspace)
         self.assertIn('same profileId', workspace)
 
+    def test_profile_basics_are_editable_from_professional_library(self):
+        library = (ROOT / "src" / "ProfessionalLibrary.tsx").read_text(encoding="utf-8")
+        self.assertIn('basicDraft', library)
+        self.assertIn('saveBasicInfo', library)
+        self.assertIn('Edit personal information', library)
+        self.assertIn('candidate.id === profileId', library)
+        self.assertNotIn('documents.map((document)', library)
+
+    def test_new_blank_cv_reapplies_canonical_profile_basics_only(self):
+        helper = (ROOT / "src" / "profileBasics.ts").read_text(encoding="utf-8")
+        library = (ROOT / "src" / "CVLibrary.tsx").read_text(encoding="utf-8")
+        self.assertIn('applyProfileBasicsToNewBlankCvFromStorage', helper)
+        for field in ("name", "email", "phone", "location", "linkedin"):
+            self.assertIn(f'{field}: basic.{field}', helper)
+        self.assertIn('modeAtCreation !== "blank"', library)
+        self.assertIn('applyProfileBasicsToNewBlankCvFromStorage()', library)
+
     def test_phase2_does_not_change_workspace_schema(self):
         workspace = (ROOT / "src" / "workspace.ts").read_text(encoding="utf-8")
         self.assertIn('schema: 2;', workspace)
