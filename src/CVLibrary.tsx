@@ -3,7 +3,7 @@ import CVLibraryComposer from "./CVLibraryComposer";
 import ProfessionalLibrary from "./ProfessionalLibrary";
 import { applyProfileBasicsToNewBlankCvFromStorage } from "./profileBasics";
 import type { CVWorkspace } from "./workspace";
-import { MAX_ACTIVE_CVS } from "./workspace";
+import { loadWorkspaceLocal, MAX_ACTIVE_CVS } from "./workspace";
 
 type LibraryCopy = {
   title: string;
@@ -93,7 +93,8 @@ export default function CVLibrary(props: Props) {
       ? document.archived
       : !document.archived && (props.selectedCollection === "all" || document.collectionId === props.selectedCollection))
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  const composeDocument = composeDocumentId ? props.workspace.documents.find((document) => document.id === composeDocumentId) : undefined;
+  const composeWorkspace = composeDocumentId ? loadWorkspaceLocal(props.workspace) : props.workspace;
+  const composeDocument = composeDocumentId ? composeWorkspace.documents.find((document) => document.id === composeDocumentId) : undefined;
 
   const createDocument = () => {
     const modeAtCreation = props.creationMode;
@@ -108,7 +109,7 @@ export default function CVLibrary(props: Props) {
   return <div className="libraryOverlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) props.onClose(); }}>
     <section className="libraryPanel" role="dialog" aria-modal="true" aria-labelledby="library-title">
       <div className="libraryHead"><div><span className="eyebrow">CODECAFE LIBRARY</span><h2 id="library-title">{t.title}</h2><p>{t.subtitle}</p></div><button onClick={props.onClose} aria-label={t.close}>×</button></div>
-      {composeDocument ? <CVLibraryComposer lang={props.lang} workspace={props.workspace} document={composeDocument} onClose={() => setComposeDocumentId(null)} /> : <>
+      {composeDocument ? <CVLibraryComposer lang={props.lang} workspace={composeWorkspace} document={composeDocument} onClose={() => setComposeDocumentId(null)} /> : <>
         <div className="libraryModeTabs" role="tablist" aria-label="CodeCafe Library">
           <button className={mode === "cvs" ? "selected" : ""} onClick={() => setMode("cvs")} role="tab" aria-selected={mode === "cvs"}>{t.cvsTab}</button>
           <button className={mode === "professional" ? "selected" : ""} onClick={() => setMode("professional")} role="tab" aria-selected={mode === "professional"}>{t.professionalTab}</button>
