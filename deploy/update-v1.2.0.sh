@@ -31,13 +31,35 @@ done
 # Comprueba que el repositorio seleccionado declara exactamente la versión esperada.
 release_version="$(python3 -c 'import json; print(json.load(open("/opt/codecafe-studio/apps/codecafe-cv-studio-source/package.json"))["version"])')"
 case "${release_version}" in
-  1.3.0|1.4.0|1.4.1|1.4.2|1.4.3|1.4.4|1.4.5|1.4.6) ;;
+  1.3.0|1.4.0|1.4.1|1.4.2|1.4.3|1.4.4|1.4.5|1.4.6|1.4.7) ;;
   *) echo "DETENIDO: versión incompatible: ${release_version}"; exit 1 ;;
 esac
 
 # Recupera desde Git el programa Python de la versión funcional v1.1.0.
 # Se conserva fuera del nombre activo para poder restaurarlo si el reinicio falla.
 timestamp="$(date -u +%Y%m%d-%H%M%S)"
+
+# Conserva una copia íntegra de la base de revisiones antes de reiniciar el servicio.
+database_path="/var/lib/codecafe-cv-sync/backups.sqlite3"
+database_backup_dir="/var/lib/codecafe-cv-sync/deployment-backups"
+database_backup=""
+if [[ -f "${database_path}" ]]; then
+    install -d -m 0700 -o root -g root "${database_backup_dir}"
+    database_backup="${database_backup_dir}/backups-${timestamp}.sqlite3"
+    DATABASE_SOURCE="${database_path}" DATABASE_DESTINATION="${database_backup}" python3 - <<'PY'
+# Importa las bibliotecas estándar necesarias para una copia SQLite consistente.
+import os
+import sqlite3
+
+# Abre la base activa y crea un archivo de respaldo independiente.
+with sqlite3.connect(os.environ["DATABASE_SOURCE"]) as source:
+    with sqlite3.connect(os.environ["DATABASE_DESTINATION"]) as destination:
+        # Usa la API de respaldo de SQLite para incluir sólo transacciones confirmadas.
+        source.backup(destination)
+PY
+    chmod 0600 "${database_backup}"
+fi
+
 server_backup="${source_dir}/server/app.py.before-update-${timestamp}"
 git -C "${source_dir}" show "${previous_commit}:server/app.py" > "${server_backup}"
 chmod 0644 "${server_backup}"
@@ -135,3 +157,6 @@ systemctl is-active codecafe-cv-sync.service
 # Imprime la ruta exacta que permite regresar manualmente al HTML anterior.
 echo "CodeCafe CV Studio v${release_version} activo. Respaldo HTML: ${index_backup}"
 echo "Programa Python anterior: ${server_backup}"
+if [[ -n "${database_backup}" ]]; then
+    echo "Base de revisiones protegida: ${database_backup}"
+fi

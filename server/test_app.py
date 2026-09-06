@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app import ConflictError, Store, make_password_hash, verify_password
+from app import ConflictError, SessionRegistry, Store, make_password_hash, verify_password
 
 
 class PasswordTests(unittest.TestCase):
@@ -49,6 +49,14 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(ConflictError):
             self.store.save(self.payload("two"), "2" * 64, 0)
         self.assertEqual(first["revision"], self.store.latest()["revision"])
+
+    def test_authenticated_session_survives_service_restart(self):
+        first_registry = SessionRegistry(self.store)
+        token, csrf = first_registry.create()
+        restarted_registry = SessionRegistry(self.store)
+        self.assertEqual(csrf, restarted_registry.validate(token))
+        restarted_registry.delete(token)
+        self.assertIsNone(SessionRegistry(self.store).validate(token))
 
 
 if __name__ == "__main__":

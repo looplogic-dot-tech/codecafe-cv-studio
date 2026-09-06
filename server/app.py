@@ -25,7 +25,8 @@ from typing import Any
 APP_NAME = "CodeCafe CV Sync"
 COOKIE_NAME = "codecafe_cv_session"
 MAX_BODY_BYTES = 12 * 1024 * 1024
-SESSION_SECONDS = 12 * 60 * 60
+# Mantiene la sesión segura durante treinta días para que el respaldo automático no dependa de reconectar a diario.
+SESSION_SECONDS = 30 * 24 * 60 * 60
 PASSWORD_ITERATIONS = 310_000
 
 
@@ -80,6 +81,14 @@ class Store:
                     saved_at TEXT NOT NULL,
                     digest TEXT NOT NULL UNIQUE,
                     payload TEXT NOT NULL
+                )"""
+            )
+            # Conserva sesiones autenticadas entre reinicios del servicio.
+            database.execute(
+                """CREATE TABLE IF NOT EXISTS sessions (
+                    token_hash TEXT PRIMARY KEY,
+                    csrf TEXT NOT NULL,
+                    expires_at REAL NOT NULL
                 )"""
             )
         os.chmod(self.database_path, 0o600)
@@ -163,6 +172,35 @@ class Store:
             database.commit()
         return {"revision": revision, "savedAt": now}, False
 
+    def create_session(self, token: str, csrf: str, expires_at: float) -> None:
+        """Guarda únicamente la huella del token para que la sesión sobreviva reinicios."""
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        with self.connect() as database:
+            database.execute("DELETE FROM sessions WHERE expires_at < ?", (time.time(),))
+            database.execute(
+                "INSERT OR REPLACE INTO sessions(token_hash, csrf, expires_at) VALUES (?, ?, ?)",
+                (token_hash, csrf, expires_at),
+            )
+
+    def validate_session(self, token: str) -> str | None:
+        """Devuelve el CSRF sólo cuando el token persistido continúa vigente."""
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        with self.connect() as database:
+            row = database.execute(
+                "SELECT csrf, expires_at FROM sessions WHERE token_hash = ?",
+                (token_hash,),
+            ).fetchone()
+            if not row or float(row["expires_at"]) < time.time():
+                database.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+                return None
+        return str(row["csrf"])
+
+    def delete_session(self, token: str) -> None:
+        """Elimina la sesión persistida sin exponer el token original en SQLite."""
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        with self.connect() as database:
+            database.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+
 
 class ConflictError(Exception):
     def __init__(self, current_revision: int) -> None:
@@ -171,7 +209,8 @@ class ConflictError(Exception):
 
 
 class SessionRegistry:
-    def __init__(self) -> None:
+    def __init__(self, store: Store) -> None:
+        self._store = store
         self._sessions: dict[str, tuple[float, str]] = {}
         self._attempts: dict[str, list[float]] = {}
         self._lock = threading.Lock()
@@ -190,8 +229,10 @@ class SessionRegistry:
     def create(self) -> tuple[str, str]:
         token = secrets.token_urlsafe(32)
         csrf = secrets.token_urlsafe(24)
+        expires_at = time.time() + SESSION_SECONDS
         with self._lock:
-            self._sessions[token] = (time.time() + SESSION_SECONDS, csrf)
+            self._sessions[token] = (expires_at, csrf)
+        self._store.create_session(token, csrf, expires_at)
         return token, csrf
 
     def validate(self, token: str | None) -> str | None:
@@ -200,7 +241,7 @@ class SessionRegistry:
         with self._lock:
             session = self._sessions.get(token)
             if not session:
-                return None
+                return self._store.validate_session(token)
             expires, csrf = session
             if expires < time.time():
                 self._sessions.pop(token, None)
@@ -211,6 +252,7 @@ class SessionRegistry:
         if token:
             with self._lock:
                 self._sessions.pop(token, None)
+            self._store.delete_session(token)
 
 
 class AppServer(ThreadingHTTPServer):
@@ -221,7 +263,7 @@ class AppServer(ThreadingHTTPServer):
         self.store = store
         self.password_hash = password_hash
         self.allowed_origin = allowed_origin.rstrip("/")
-        self.sessions = SessionRegistry()
+        self.sessions = SessionRegistry(store)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -283,6 +325,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if method == "POST" and path == "/api/session":
                 self.login()
+                return
+            if method == "GET" and path == "/api/session":
+                csrf = self.require_session()
+                latest = self.server.store.latest()
+                self.json_response(HTTPStatus.OK, {
+                    "csrfToken": csrf,
+                    "encryptionSalt": self.server.store.encryption_salt,
+                    "currentRevision": latest["revision"] if latest else 0,
+                })
                 return
             if method == "DELETE" and path == "/api/session":
                 self.logout()
@@ -413,7 +464,8 @@ def main() -> None:
     data_dir = Path(os.environ.get("CODECAFE_CV_DATA_DIR", "/var/lib/codecafe-cv-sync"))
     host = os.environ.get("CODECAFE_CV_HOST", "127.0.0.1")
     port = int(os.environ.get("CODECAFE_CV_PORT", "5002"))
-    retention = max(2, min(int(os.environ.get("CODECAFE_CV_RETENTION", "20")), 200))
+    # Conserva hasta doscientas revisiones para que el autoguardado no desplace rápidamente copias útiles.
+    retention = max(2, min(int(os.environ.get("CODECAFE_CV_RETENTION", "200")), 200))
     origin = os.environ.get("CODECAFE_CV_ORIGIN", "https://cv.codecafe.io")
     server = AppServer((host, port), Store(data_dir, retention), password_hash, origin)
     print(f"{APP_NAME} escuchando en http://{host}:{port}", flush=True)

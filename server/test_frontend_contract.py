@@ -120,6 +120,15 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("profileId: preserved.activeProfileId", app)
         self.assertIn("document.profileId === activeProfileId", library)
 
+    def test_every_edit_is_saved_locally_and_queued_for_ec2(self):
+        app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+        cloud = (ROOT / "src" / "cloud.ts").read_text(encoding="utf-8")
+        self.assertIn("saveWorkspaceLocal(updatedWorkspace)", app)
+        self.assertIn("ec2SaveQueueRef.current", app)
+        self.assertIn("serverRevisionRef.current", app)
+        self.assertIn("restoreServerSession()", app)
+        self.assertIn('api<ServerSession>("/api/session")', cloud)
+
 
 if __name__ == "__main__":
     unittest.main()

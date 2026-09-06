@@ -114,6 +114,11 @@ export async function connectServer(password: string): Promise<ServerSession> {
   });
 }
 
+// Recupera la sesión segura creada anteriormente mediante la cookie HttpOnly.
+export async function restoreServerSession(): Promise<ServerSession> {
+  return api<ServerSession>("/api/session");
+}
+
 export async function disconnectServer(csrfToken: string): Promise<void> {
   await api("/api/session", { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   authorizeGoogleDrive,
   backupDigest,
@@ -14,6 +14,7 @@ import {
   loadRuntimeCloudConfig,
   loadServerBackup,
   loadServerBackupRevision,
+  restoreServerSession,
   GooglePrintableCV,
   RuntimeCloudConfig,
   saveGoogleBackup,
@@ -301,6 +302,9 @@ export default function Home() {
   const [syncPassword, setSyncPassword] = useState("");
   const [serverSession, setServerSession] = useState<ServerSession | null>(null);
   const [serverRevision, setServerRevision] = useState(0);
+  const serverRevisionRef = useRef(0);
+  const ec2SaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const [serverHistory, setServerHistory] = useState<ServerBackupRevision[]>([]);
   const [selectedRevision, setSelectedRevision] = useState(0);
   const [googleToken, setGoogleToken] = useState("");
@@ -349,11 +353,21 @@ export default function Home() {
     setTemplate(document.settings.template);
     setPhotoOn(document.settings.photoOn);
     saveWorkspaceLocal(loadedWorkspace);
+    setWorkspaceReady(true);
   }, []);
 
   useEffect(() => {
     loadRuntimeCloudConfig().then(setCloudConfig);
     setGoogleToken(loadStoredGoogleToken());
+    // La cookie HttpOnly permite reconectar sin volver a pedir la contraseña.
+    restoreServerSession().then(async (session) => {
+      setServerSession(session);
+      setServerRevision(session.currentRevision);
+      serverRevisionRef.current = session.currentRevision;
+      setSelectedRevision(session.currentRevision);
+      setServerHistory(await listServerBackups());
+      setCloudStatus("connected");
+    }).catch(() => undefined);
   }, []);
 
   const score = useMemo(() => {
@@ -396,6 +410,33 @@ export default function Home() {
   };
   const workspaceWithCurrent = () => replaceCurrentDocument(workspace, cv, { lang, template, photoOn });
   const backupDocument = (): BackupDocument => ({ schema: 2, savedAt: new Date().toISOString(), workspace: workspaceWithCurrent() });
+
+  // Conserva cada edición localmente de inmediato y crea una revisión EC2 tras una pausa breve.
+  useEffect(() => {
+    if (!workspaceReady) return;
+    const updatedWorkspace = replaceCurrentDocument(workspace, cv, { lang, template, photoOn });
+    saveWorkspaceLocal(updatedWorkspace);
+    localStorage.setItem("codecafe-cv", JSON.stringify(cv));
+    localStorage.setItem("codecafe-cv-settings", JSON.stringify({ lang, template, photoOn }));
+    if (!serverSession) return;
+    const timer = window.setTimeout(() => {
+      const document: BackupDocument = { schema: 2, savedAt: new Date().toISOString(), workspace: updatedWorkspace };
+      ec2SaveQueueRef.current = ec2SaveQueueRef.current.then(async () => {
+        setCloudStatus("syncing");
+        const digest = await backupDigest(document);
+        const result = await saveServerBackup(document, digest, serverRevisionRef.current, serverSession.csrfToken);
+        serverRevisionRef.current = result.revision;
+        setServerRevision(result.revision);
+        setSelectedRevision(result.revision);
+        setServerHistory(await listServerBackups());
+        setCloudStatus("synced");
+      }).catch((error: Error & { status?: number }) => {
+        setCloudStatus(error.status === 409 ? "conflict" : "error");
+        setCloudMessage(error.message);
+      });
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [cv, lang, photoOn, serverSession, template, workspace, workspaceReady]);
   const googlePrintable = (): GooglePrintableCV => {
     const currentWorkspace = workspaceWithCurrent();
     const document = activeDocument(currentWorkspace);
@@ -436,14 +477,16 @@ export default function Home() {
     setCloudMessage(t.cloudLoaded);
   };
   const syncCloud = async () => {
-    if ((!serverSession && !googleToken) || (serverSession && !syncPassword)) return;
+    if (!serverSession && !googleToken) return;
     setCloudStatus("syncing");
     setCloudMessage("");
     try {
       if (serverSession) {
         const document = backupDocument();
         const digest = await backupDigest(document);
-        const result = await saveServerBackup(document, digest, serverRevision, serverSession.csrfToken);
+        await ec2SaveQueueRef.current;
+        const result = await saveServerBackup(document, digest, serverRevisionRef.current, serverSession.csrfToken);
+        serverRevisionRef.current = result.revision;
         setServerRevision(result.revision);
         setSelectedRevision(result.revision);
         setServerHistory(await listServerBackups());
@@ -468,6 +511,7 @@ export default function Home() {
       const session = await connectServer(syncPassword);
       setServerSession(session);
       setServerRevision(session.currentRevision);
+      serverRevisionRef.current = session.currentRevision;
       setSelectedRevision(session.currentRevision);
       setServerHistory(await listServerBackups());
       setCloudStatus("connected");
@@ -480,12 +524,13 @@ export default function Home() {
     if (serverSession) await disconnectServer(serverSession.csrfToken).catch(() => undefined);
     setServerSession(null);
     setServerRevision(0);
+    serverRevisionRef.current = 0;
     setSelectedRevision(0);
     setServerHistory([]);
     setCloudStatus("local");
   };
   const restoreEc2 = async () => {
-    if (!serverSession || !syncPassword) return;
+    if (!serverSession) return;
     try {
       const backup = await loadServerBackup();
       if (!backup) throw new Error("EC2 todavía no contiene respaldos.");
@@ -494,6 +539,7 @@ export default function Home() {
         : backup.payload as BackupDocument;
       applyBackup(document);
       setServerRevision(backup.revision);
+      serverRevisionRef.current = backup.revision;
       setCloudStatus("connected");
     } catch (error) {
       setCloudStatus("error");
@@ -501,7 +547,7 @@ export default function Home() {
     }
   };
   const restoreEc2Revision = async () => {
-    if (!serverSession || !syncPassword || !selectedRevision) return;
+    if (!serverSession || !selectedRevision) return;
     try {
       const backup = await loadServerBackupRevision(selectedRevision);
       if (!backup) throw new Error("La revisión seleccionada ya no existe.");
