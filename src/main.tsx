@@ -5,6 +5,7 @@ import "./styles.css";
 import "./print-preview.css";
 import "./sync-notice.css";
 import { installPrintPreview } from "./printPreview";
+import { installPrintSettingsSync } from "./printSettingsSync";
 import { installSyncNotice } from "./syncNotice";
 
 createRoot(document.getElementById("root")!).render(
@@ -13,5 +14,6 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 
+installPrintSettingsSync();
 installPrintPreview();
 installSyncNotice();
