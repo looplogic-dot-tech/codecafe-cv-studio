@@ -16,6 +16,13 @@ class ProfileCloudRegressionTests(unittest.TestCase):
             workspace,
         )
 
+    def test_existing_cvs_are_backfilled_only_inside_their_profile(self):
+        workspace = (ROOT / "src" / "workspace.ts").read_text(encoding="utf-8")
+        self.assertIn("deriveProfileBasicInfo(assignedDocuments, profile.id)", workspace)
+        self.assertIn("newlyMigratedProfileIds.has(document.profileId!)", workspace)
+        self.assertIn("fillMissingBasicInfo(document.cv, basicInfo)", workspace)
+        self.assertIn("document.profileId === profileId", workspace)
+
     def test_google_identity_services_is_preloaded(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn("https://accounts.google.com/gsi/client", index)
