@@ -94,6 +94,15 @@ class FrontendContractTests(unittest.TestCase):
         for extension in ('"pdf"', '"docx"', '"odt"', '"ods"'):
             self.assertIn(extension, extraction)
 
+    def test_pdf_import_reconstructs_lines_and_splits_cv_sections(self):
+        extraction = (ROOT / "src" / "cvImport.ts").read_text(encoding="utf-8")
+        self.assertIn("function rebuildPdfLines", extraction)
+        self.assertIn("fragment.hasEOL", extraction)
+        self.assertIn("fragment.transform[5]", extraction)
+        self.assertIn("function isRecognizedHeading", extraction)
+        self.assertIn("formatPdfLines(rebuildPdfLines(content.items))", extraction)
+        self.assertIn("isRecognizedHeading(trimmed)", extraction)
+
     def test_application_about_and_company_bold(self):
         app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
         self.assertIn("Acerca de CodeCafe CV Studio", app)

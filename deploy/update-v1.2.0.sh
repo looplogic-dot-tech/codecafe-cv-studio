@@ -31,7 +31,7 @@ done
 # Comprueba que el repositorio seleccionado declara exactamente la versión esperada.
 release_version="$(python3 -c 'import json; print(json.load(open("/opt/codecafe-studio/apps/codecafe-cv-studio-source/package.json"))["version"])')"
 case "${release_version}" in
-  1.3.0|1.4.0|1.4.1|1.4.2|1.4.3|1.4.4|1.4.5) ;;
+  1.3.0|1.4.0|1.4.1|1.4.2|1.4.3|1.4.4|1.4.5|1.4.6) ;;
   *) echo "DETENIDO: versión incompatible: ${release_version}"; exit 1 ;;
 esac
 
