@@ -220,8 +220,20 @@ function printableTools(value: string): string {
 
 function printableStructuredLines(value: string): string {
   return parseToolLines(value).map(({ category, content }) => category
-    ? `<p><strong>${escapeHtml(category)}${content ? ":" : ""}</strong>${content ? ` ${escapeHtml(content)}` : ""}</p>`
-    : `<p>${escapeHtml(content)}</p>`).join("");
+    ? `<p><strong>${escapeHtml(category)}${content ? ":" : ""}</strong>${content ? ` ${printableInlineText(content)}` : ""}</p>`
+    : `<p>${printableInlineText(content)}</p>`).join("");
+}
+
+function printableInlineText(value: string): string {
+  const linkPattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi;
+  let cursor = 0;
+  let html = "";
+  for (const match of value.matchAll(linkPattern)) {
+    html += escapeHtml(value.slice(cursor, match.index));
+    html += `<a href="${escapeHtml(match[2])}">${escapeHtml(match[1])}</a>`;
+    cursor = (match.index ?? 0) + match[0].length;
+  }
+  return html + escapeHtml(value.slice(cursor));
 }
 
 function printableRepository(value: string | undefined, label: string): string {
@@ -822,7 +834,20 @@ function ToolCategories({ value }: { value: string }) {
 }
 
 function StructuredLines({ value }: { value: string }) {
-  return <>{parseToolLines(value).map((line, index) => <p className="structuredLine" key={index}>{line.category ? <><b>{line.category}{line.content ? ":" : ""}</b>{line.content && <> {line.content}</>}</> : line.content}</p>)}</>;
+  return <>{parseToolLines(value).map((line, index) => <p className="structuredLine" key={index}>{line.category ? <><b>{line.category}{line.content ? ":" : ""}</b>{line.content && <> <InlineText value={line.content} /></>}</> : <InlineText value={line.content} />}</p>)}</>;
+}
+
+function InlineText({ value }: { value: string }) {
+  const parts: React.ReactNode[] = [];
+  const linkPattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi;
+  let cursor = 0;
+  for (const match of value.matchAll(linkPattern)) {
+    if ((match.index ?? 0) > cursor) parts.push(value.slice(cursor, match.index));
+    parts.push(<a href={match[2]} target="_blank" rel="noreferrer" key={`${match.index}-${match[2]}`}>{match[1]}</a>);
+    cursor = (match.index ?? 0) + match[0].length;
+  }
+  if (cursor < value.length) parts.push(value.slice(cursor));
+  return <>{parts}</>;
 }
 
 function CVSection({ title, defaultTitle, onTitleChange, resetLabel, children }: { title: string; defaultTitle?: string; onTitleChange?: (value: string) => void; resetLabel?: string; children: React.ReactNode }) {

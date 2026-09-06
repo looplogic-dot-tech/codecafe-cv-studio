@@ -1,5 +1,11 @@
 # Historial de versiones
 
+## 1.4.3 — 2026-09-06
+
+- Convierte `[texto](https://dirección)` en un hipervínculo seguro dentro de los campos estructurados.
+- Conserva el enlace en la vista previa y en las copias imprimibles/PDF que admitan vínculos.
+- Rechaza esquemas ejecutables: sólo reconoce direcciones `http://` y `https://`.
+
 ## 1.4.2 — 2026-09-06
 
 - Reconoce líneas completas escritas como `**Encabezado**` y las presenta en negrita.

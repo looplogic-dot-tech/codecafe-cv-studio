@@ -75,6 +75,14 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('line.match(/^\\*\\*(.+?)\\*\\*(.*)$/)', app)
         self.assertIn('line.content ? ":" : ""', app)
 
+    def test_safe_markdown_links_render_in_preview_and_print(self):
+        app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+        self.assertIn("function printableInlineText", app)
+        self.assertIn("function InlineText", app)
+        self.assertIn("https?:\\/\\/", app)
+        self.assertIn('rel="noreferrer"', app)
+        self.assertIn("printableInlineText(content)", app)
+
 
 if __name__ == "__main__":
     unittest.main()
