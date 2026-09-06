@@ -55,12 +55,18 @@ function writeWorkspacePrint(workspace: CVWorkspace, documentId: string, setting
   };
 }
 
+function enforceLetterPreviewLabel(): void {
+  const zoom = document.querySelector<HTMLElement>(".previewTop .zoom");
+  if (zoom && zoom.textContent !== "Letter · 100%") zoom.textContent = "Letter · 100%";
+}
+
 export function installPrintSettingsSync(): void {
   let currentDocumentId = "";
   let lastLegacy = "";
   let lastWorkspace = "";
 
   const synchronize = () => {
+    enforceLetterPreviewLabel();
     const workspace = readWorkspace();
     if (!workspace) return;
     const document = workspace.documents.find((item) => item.id === workspace.activeDocumentId);
