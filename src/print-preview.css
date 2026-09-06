@@ -37,4 +37,5 @@
 .printPreviewLauncher{white-space:nowrap}
 @media(max-width:900px){.printSetupDialog{grid-template-columns:1fr;max-height:calc(100vh - 20px)}.printSetupPreviewColumn{min-height:430px}.printSetupControls{border-top:1px solid var(--line)}}
 @media(max-width:600px){.printSetupOverlay{padding:6px}.printSetupDialog{border-radius:12px}.printSetupPreviewColumn{padding:14px;min-height:350px}.printPreviewFrame{transform:scale(.78);transform-origin:top center;margin-bottom:-128px}.printSetupControls{padding:18px}.printPresetRow{grid-template-columns:1fr}.printMarginGrid{grid-template-columns:1fr 1fr}.printPreviewLauncher{padding:10px 11px;font-size:0}.printPreviewLauncher:after{content:"LTR";font-size:11px}.printBreakMarker button{right:2px;font-size:7px}}
-@media print{.printSetupOverlay,.printBreakMarker,.printBreakSpacer{display:none!important}}
+@page{size:Letter portrait;margin:14mm 16mm}
+@media print{.printSetupOverlay,.printBreakMarker,.printBreakSpacer{display:none!important}.previewPane{padding:0!important;max-height:none!important;overflow:visible!important}.paper{box-shadow:none!important;max-width:none!important;width:auto!important;min-height:0!important;margin:0!important;padding:0!important}}
