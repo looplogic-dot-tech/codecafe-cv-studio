@@ -22,6 +22,8 @@ import {
   ServerBackupRevision,
 } from "./cloud";
 import CVLibrary from "./CVLibrary";
+import CVImporter from "./CVImporter";
+import type { ImportedBlock } from "./cvImport";
 import {
   activeDocument,
   createInitialWorkspace,
@@ -38,12 +40,12 @@ import {
 type Job = { role: string; company: string; dates: string; bullets: string };
 type Project = { name: string; stack: string; description: string; repository?: string };
 type CustomSection = { title: string; content: string };
-export type SectionId = "profile" | "experience" | "core_skills" | "tools" | "projects" | "certifications" | "skills" | "education" | "languages";
+export type SectionId = "profile" | "experience" | "core_skills" | "tools" | "projects" | "certifications" | "skills" | "education" | "languages" | "about";
 export type SectionTitles = Partial<Record<SectionId, string>>;
 export type CV = {
   name: string; title: string; email: string; phone: string; location: string; linkedin: string;
   summary: string; skills: string; coreSkills: string; tools: string; certifications: string;
-  education: string; languages: string; jobs: Job[]; projects: Project[]; customSections: CustomSection[]; photo: string;
+  education: string; languages: string; about?: string; jobs: Job[]; projects: Project[]; customSections: CustomSection[]; photo: string;
   sectionTitles?: SectionTitles;
 };
 export type Lang = "es" | "en";
@@ -80,6 +82,7 @@ const seed: CV = {
     { name: "Proyecto demostrativo", stack: "JavaScript · HTML · CSS", description: "Herramienta de ejemplo para organizar información y simplificar un proceso operativo.", repository: "" },
   ],
   customSections: [],
+  about: "",
 };
 
 const blankCV: CV = {
@@ -88,6 +91,7 @@ const blankCV: CV = {
   jobs: [{ role: "", company: "", dates: "", bullets: "" }],
   projects: [],
   customSections: [],
+  about: "",
 };
 
 const copy = {
@@ -130,6 +134,7 @@ const copy = {
     customSections: "Secciones personalizadas", customSection: "Sección personalizada", sectionTitle: "Título de la sección",
     sectionContent: "Contenido", addCustomSection: "＋ Añadir sección personalizada", resetTitle: "Restablecer título",
     toolsHint: "Pega una categoría por línea con el formato Categoría: contenido. El texto anterior también funciona.",
+    importCv: "Importar CV", about: "Acerca de", aboutHeading: "Acerca de",
   },
   en: {
     tagline: "Your experience, clearly presented.", save: "Save", saved: "✓ Saved", pdf: "Download PDF",
@@ -170,6 +175,7 @@ const copy = {
     customSections: "Custom sections", customSection: "Custom section", sectionTitle: "Section title",
     sectionContent: "Content", addCustomSection: "＋ Add custom section", resetTitle: "Reset title",
     toolsHint: "Paste one category per line as Category: content. Existing plain text still works.",
+    importCv: "Import résumé", about: "About", aboutHeading: "About",
   },
 } as const;
 
@@ -244,12 +250,17 @@ function printableRepository(value: string | undefined, label: string): string {
   return /^https?:\/\//i.test(repository) ? `<p class="repository"><strong>${safeLabel}:</strong> <a href="${safe}">${safe}</a></p>` : `<p class="repository"><strong>${safeLabel}:</strong> ${safe}</p>`;
 }
 
+function printableBoldInline(value: string): string {
+  const match = value.match(/^\*\*(.+?)\*\*$/);
+  return match ? `<strong>${printableInlineText(match[1])}</strong>` : printableInlineText(value);
+}
+
 // Genera únicamente la copia portátil para Drive; la interfaz React funcional no se reconstruye.
 function buildPrintableHtml(cv: CV, lang: Lang, labels: (typeof copy)[Lang]): string {
   const title = (id: SectionId, fallback: string) => cv.sectionTitles?.[id]?.trim() || fallback;
   const section = (title: string, body: string) => body ? `<section><h2>${escapeHtml(title)}</h2>${body}</section>` : "";
   const jobs = cv.jobs.filter((job) => job.role || job.company || job.bullets).map((job) => `
-    <div class="entry"><h3>${escapeHtml(job.role)} — ${escapeHtml(job.company)}</h3><time>${escapeHtml(job.dates)}</time>
+    <div class="entry"><h3>${escapeHtml(job.role)} — ${printableBoldInline(job.company)}</h3><time>${escapeHtml(job.dates)}</time>
     <ul>${job.bullets.split("\n").filter(Boolean).map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul></div>`).join("");
   const projects = cv.projects.filter((project) => project.name || project.description || project.repository).map((project) => `
     <div class="entry"><h3>${escapeHtml(project.name)}</h3><strong>${escapeHtml(project.stack)}</strong>${printableStructuredLines(project.description)}${printableRepository(project.repository, labels.repository)}</div>`).join("");
@@ -259,6 +270,7 @@ function buildPrintableHtml(cv: CV, lang: Lang, labels: (typeof copy)[Lang]): st
   <style>@page{size:A4;margin:18mm}body{font-family:Arial,sans-serif;color:#172033;font-size:10.5pt;line-height:1.42;max-width:178mm;margin:auto}header{border-bottom:3px solid #3157a4;padding-bottom:10px}h1{font-size:25pt;margin:0;color:#193467}header h2{border:0;margin:3px 0;font-size:14pt}header p{margin:3px 0}section{margin-top:14px}section h2{font-size:11pt;letter-spacing:.08em;text-transform:uppercase;color:#3157a4;border-bottom:1px solid #cbd5e1;padding-bottom:3px}p{margin:4px 0}.entry{break-inside:avoid;margin:8px 0}.entry h3{font-size:10.5pt;margin:0}.entry time{color:#526071}ul{margin:4px 0 0 18px;padding:0}li{margin:2px 0}.tool-category{break-inside:avoid;margin:0 0 7px}.tool-category strong{display:block;color:#39465a;font-size:9.5pt}.tool-category p{margin:1px 0 0}</style></head><body>
   <header><h1>${escapeHtml(cv.name)}</h1><h2>${escapeHtml(cv.title)}</h2><p>${[cv.email, cv.phone, cv.location].filter(Boolean).map(escapeHtml).join(" · ")}</p>${cv.linkedin ? `<p>${escapeHtml(cv.linkedin)}</p>` : ""}</header>
   ${section(title("profile", labels.profileHeading), cv.summary ? `<p>${escapeHtml(cv.summary)}</p>` : "")}
+  ${section(title("about", labels.aboutHeading), printableStructuredLines(cv.about || ""))}
   ${section(title("experience", labels.experienceHeading), jobs)}
   ${section(title("core_skills", labels.coreHeading), printableStructuredLines(cv.coreSkills))}
   ${section(title("tools", labels.toolsHeading), cv.tools ? printableTools(cv.tools) : "")}
@@ -296,6 +308,7 @@ export default function Home() {
   const [creationMode, setCreationMode] = useState<"blank" | "copy" | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftCollection, setDraftCollection] = useState("general");
+  const [importOpen, setImportOpen] = useState(false);
   const t = copy[lang];
 
   useEffect(() => {
@@ -355,6 +368,27 @@ export default function Home() {
     else delete sectionTitles[id];
     return { ...current, sectionTitles };
   });
+  const insertImportedBlocks = (blocks: ImportedBlock[]) => {
+    const append = (existing: string | undefined, added: string) => [existing?.trim(), added.trim()].filter(Boolean).join("\n\n");
+    setCV((current) => {
+      const next = structuredClone(current);
+      for (const block of blocks) {
+        if (block.target === "custom") {
+          next.customSections.push({ title: block.customTitle?.trim() || block.heading, content: block.text });
+        } else if (block.target === "experience") {
+          next.jobs.push({ role: block.heading, company: "", dates: "", bullets: block.text });
+        } else if (block.target === "projects") {
+          next.projects.push({ name: block.heading, stack: "", description: block.text, repository: "" });
+        } else if (block.target !== "skip") {
+          const key = block.target as "summary" | "coreSkills" | "tools" | "certifications" | "education" | "languages" | "about";
+          next[key] = append(next[key], block.text);
+        }
+      }
+      return next;
+    });
+    setImportOpen(false);
+    setCloudStatus("local");
+  };
   const workspaceWithCurrent = () => replaceCurrentDocument(workspace, cv, { lang, template, photoOn });
   const backupDocument = (): BackupDocument => ({ schema: 2, savedAt: new Date().toISOString(), workspace: workspaceWithCurrent() });
   const googlePrintable = (): GooglePrintableCV => {
@@ -656,6 +690,7 @@ export default function Home() {
     const sections = [
       `${cv.name}\n${cv.title}\n${cv.email} | ${cv.phone} | ${cv.location}\n${cv.linkedin}`,
       `${sectionTitle("profile", t.profileHeading).toUpperCase()}\n${cv.summary}`,
+      cv.about && `${sectionTitle("about", t.aboutHeading).toUpperCase()}\n${cv.about}`,
       `${sectionTitle("experience", t.experienceHeading).toUpperCase()}\n${cv.jobs.map((j) => `${j.role} — ${j.company} (${j.dates})\n${j.bullets}`).join("\n\n")}`,
       cv.coreSkills && `${sectionTitle("core_skills", t.coreHeading).toUpperCase()}\n${cv.coreSkills}`,
       cv.tools && `${sectionTitle("tools", t.toolsHeading).toUpperCase()}\n${cv.tools}`,
@@ -678,6 +713,7 @@ export default function Home() {
         <div className="topActions">
           <div className="langSwitch" aria-label={t.docLanguage}><button className={lang === "es" ? "selected" : ""} onClick={() => setLang("es")}>ES</button><button className={lang === "en" ? "selected" : ""} onClick={() => setLang("en")}>EN</button></div>
           <button className="libraryButton" onClick={() => setLibraryOpen(true)} title={`${t.myCvs}: ${activeDocument(workspace).name}`}>▤ <span>{t.myCvs}</span></button>
+          <button className="libraryButton" onClick={() => setImportOpen(true)}>⇩ <span>{t.importCv}</span></button>
           <button className={`cloudButton ${cloudStatus}`} onClick={() => setCloudOpen(true)} title={t.cloud}>☁ <span>{cloudStatusText}</span></button>
           <button className="ghost" onClick={save}>{saved ? t.saved : t.save}</button>
           <button className="primary" onClick={() => window.print()}>{t.pdf}</button>
@@ -699,6 +735,7 @@ export default function Home() {
             <Field label={t.location} wide><input className={inputClass} value={cv.location} onChange={(e) => set("location", e.target.value)} /></Field>
             <Field label={t.link} wide><input className={inputClass} value={cv.linkedin} onChange={(e) => set("linkedin", e.target.value)} /></Field>
             <Field label={t.summary} wide><textarea className={inputClass} rows={6} value={cv.summary} onChange={(e) => set("summary", e.target.value)} /><small className="hint">{t.summaryHint}</small></Field>
+            <Field label={t.about} wide><textarea className={inputClass} rows={4} value={cv.about ?? ""} onChange={(e) => set("about", e.target.value)} /></Field>
           </div>}
 
           {tab === "experiencia" && <div className="stack">
@@ -756,7 +793,8 @@ export default function Home() {
           <article className={`paper ${template}`}>
             <div className="cvHeader">{photoOn && cv.photo && <img className="portrait" src={cv.photo} alt={t.includePhoto} />}<div><h2>{cv.name || t.fullName}</h2><h3>{cv.title || t.professionalTitle}</h3><p>{[cv.email, cv.phone, cv.location].filter(Boolean).join("  ·  ")}</p>{cv.linkedin && <p>{cv.linkedin}</p>}</div></div>
             <CVSection title={sectionTitle("profile", t.profileHeading)} defaultTitle={t.profileHeading} onTitleChange={(value) => setSectionTitle("profile", value)} resetLabel={t.resetTitle}><p>{cv.summary}</p></CVSection>
-            <CVSection title={sectionTitle("experience", t.experienceHeading)} defaultTitle={t.experienceHeading} onTitleChange={(value) => setSectionTitle("experience", value)} resetLabel={t.resetTitle}>{cv.jobs.map((job, i) => <div className="cvJob" key={i}><div className="jobHeading"><div><b>{job.role}</b><span>{job.company}</span></div><time>{job.dates}</time></div><ul>{lines(job.bullets).map((bullet, n) => <li key={n}>{bullet}</li>)}</ul></div>)}</CVSection>
+            <CVSection title={sectionTitle("experience", t.experienceHeading)} defaultTitle={t.experienceHeading} onTitleChange={(value) => setSectionTitle("experience", value)} resetLabel={t.resetTitle}>{cv.jobs.map((job, i) => <div className="cvJob" key={i}><div className="jobHeading"><div><b>{job.role}</b><span><BoldInlineText value={job.company} /></span></div><time>{job.dates}</time></div><ul>{lines(job.bullets).map((bullet, n) => <li key={n}>{bullet}</li>)}</ul></div>)}</CVSection>
+            {cv.about && <CVSection title={sectionTitle("about", t.aboutHeading)} defaultTitle={t.aboutHeading} onTitleChange={(value) => setSectionTitle("about", value)} resetLabel={t.resetTitle}><StructuredLines value={cv.about} /></CVSection>}
             {cv.coreSkills && <CVSection title={sectionTitle("core_skills", t.coreHeading)} defaultTitle={t.coreHeading} onTitleChange={(value) => setSectionTitle("core_skills", value)} resetLabel={t.resetTitle}><StructuredLines value={cv.coreSkills} /></CVSection>}
             {cv.tools && <CVSection title={sectionTitle("tools", t.toolsHeading)} defaultTitle={t.toolsHeading} onTitleChange={(value) => setSectionTitle("tools", value)} resetLabel={t.resetTitle}><ToolCategories value={cv.tools} /></CVSection>}
             {cv.projects.some((p) => p.name || p.description || p.repository) && <CVSection title={sectionTitle("projects", t.projectsHeading)} defaultTitle={t.projectsHeading} onTitleChange={(value) => setSectionTitle("projects", value)} resetLabel={t.resetTitle}>{cv.projects.filter((p) => p.name || p.description || p.repository).map((project, i) => <div className="cvProject" key={i}><div><b>{project.name}</b><span>{project.stack}</span></div><StructuredLines value={project.description} />{project.repository && <p className="repository"><b>{t.repository}:</b> {/^https?:\/\//i.test(project.repository) ? <a href={project.repository}>{project.repository}</a> : project.repository}</p>}</div>)}</CVSection>}
@@ -792,6 +830,7 @@ export default function Home() {
         onCreateCollection={createCollection}
         onClose={() => setLibraryOpen(false)}
       />}
+      {importOpen && <CVImporter lang={lang} onInsert={insertImportedBlocks} onClose={() => setImportOpen(false)} />}
       {cloudOpen && <div className="cloudOverlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCloudOpen(false); }}>
         <section className="cloudPanel" role="dialog" aria-modal="true" aria-labelledby="cloud-title">
           <div className="cloudHead"><div><span className="eyebrow">CODECAFE CLOUD</span><h2 id="cloud-title">{t.cloudTitle}</h2></div><button onClick={() => setCloudOpen(false)} aria-label={t.close}>×</button></div>
@@ -848,6 +887,11 @@ function InlineText({ value }: { value: string }) {
   }
   if (cursor < value.length) parts.push(value.slice(cursor));
   return <>{parts}</>;
+}
+
+function BoldInlineText({ value }: { value: string }) {
+  const match = value.match(/^\*\*(.+?)\*\*$/);
+  return match ? <b><InlineText value={match[1]} /></b> : <InlineText value={value} />;
 }
 
 function CVSection({ title, defaultTitle, onTitleChange, resetLabel, children }: { title: string; defaultTitle?: string; onTitleChange?: (value: string) => void; resetLabel?: string; children: React.ReactNode }) {

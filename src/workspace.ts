@@ -16,6 +16,8 @@ export type CVCollection = {
   order: number;
 };
 
+export type CVProfile = { id: string; name: string; createdAt: string };
+
 export type CVDocument = {
   id: string;
   name: string;
@@ -25,6 +27,7 @@ export type CVDocument = {
   createdAt: string;
   updatedAt: string;
   archived: boolean;
+  profileId?: string;
 };
 
 export type CVWorkspace = {
@@ -32,7 +35,11 @@ export type CVWorkspace = {
   collections: CVCollection[];
   documents: CVDocument[];
   activeDocumentId: string;
+  profiles?: CVProfile[];
+  activeProfileId?: string;
 };
+
+export const DEFAULT_PROFILE_ID = "profile-owner";
 
 export const defaultCollections: CVCollection[] = [
   { id: "it", name: "IT", order: 0 },
@@ -55,13 +62,26 @@ export function createInitialWorkspace(cv: CV, settings: CVSettings): CVWorkspac
     createdAt: now,
     updatedAt: now,
     archived: false,
+    profileId: DEFAULT_PROFILE_ID,
   };
   return {
     schema: 2,
     collections: defaultCollections,
     documents: [document],
     activeDocumentId: document.id,
+    profiles: [{ id: DEFAULT_PROFILE_ID, name: "Jaime", createdAt: now }],
+    activeProfileId: DEFAULT_PROFILE_ID,
   };
+}
+
+export function normalizeWorkspace(workspace: CVWorkspace): CVWorkspace {
+  const profiles = workspace.profiles?.length ? workspace.profiles : [{ id: DEFAULT_PROFILE_ID, name: "Jaime", createdAt: new Date().toISOString() }];
+  const activeProfileId = profiles.some((profile) => profile.id === workspace.activeProfileId) ? workspace.activeProfileId! : profiles[0].id;
+  const documents = workspace.documents.map((document) => ({ ...document, profileId: document.profileId || profiles[0].id }));
+  const activeDocumentId = documents.some((document) => document.id === workspace.activeDocumentId && document.profileId === activeProfileId && !document.archived)
+    ? workspace.activeDocumentId
+    : documents.find((document) => document.profileId === activeProfileId && !document.archived)?.id || workspace.activeDocumentId;
+  return { ...workspace, profiles, activeProfileId, documents, activeDocumentId };
 }
 
 export function isWorkspace(value: unknown): value is CVWorkspace {
@@ -77,7 +97,9 @@ export function isWorkspace(value: unknown): value is CVWorkspace {
 }
 
 export function activeDocument(workspace: CVWorkspace): CVDocument {
-  return workspace.documents.find((document) => document.id === workspace.activeDocumentId)
+  const normalized = normalizeWorkspace(workspace);
+  return normalized.documents.find((document) => document.id === normalized.activeDocumentId && document.profileId === normalized.activeProfileId)
+    ?? normalized.documents.find((document) => document.profileId === normalized.activeProfileId && !document.archived)
     ?? workspace.documents[0];
 }
 
@@ -105,7 +127,7 @@ export function loadWorkspaceLocal(fallback: CVWorkspace): CVWorkspace {
   try {
     const parsed = JSON.parse(stored);
     if (!isWorkspace(parsed) || parsed.documents.length === 0) return fallback;
-    return parsed;
+    return normalizeWorkspace(parsed);
   } catch {
     return fallback;
   }

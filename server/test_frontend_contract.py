@@ -83,6 +83,24 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('rel="noreferrer"', app)
         self.assertIn("printableInlineText(content)", app)
 
+    def test_importer_requires_review_before_additive_insertion(self):
+        app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+        importer = (ROOT / "src" / "CVImporter.tsx").read_text(encoding="utf-8")
+        extraction = (ROOT / "src" / "cvImport.ts").read_text(encoding="utf-8")
+        self.assertIn("Insertar seleccionados", importer)
+        self.assertIn('["skip", "No insertar"', importer)
+        self.assertIn("const append =", app)
+        self.assertNotIn("setCV(import", app)
+        for extension in ('"pdf"', '"docx"', '"odt"', '"ods"'):
+            self.assertIn(extension, extraction)
+
+    def test_about_and_company_bold_remain_optional(self):
+        app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+        self.assertIn("about?: string", app)
+        self.assertIn('sectionTitle("about", t.aboutHeading)', app)
+        self.assertIn("function BoldInlineText", app)
+        self.assertIn("printableBoldInline(job.company)", app)
+
 
 if __name__ == "__main__":
     unittest.main()
