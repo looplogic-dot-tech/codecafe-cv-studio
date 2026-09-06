@@ -108,10 +108,11 @@ export function replaceCurrentDocument(
   cv: CV,
   settings: CVSettings,
 ): CVWorkspace {
+  const normalized = normalizeWorkspace(workspace);
   const updatedAt = new Date().toISOString();
   return {
-    ...workspace,
-    documents: workspace.documents.map((document) => document.id === workspace.activeDocumentId
+    ...normalized,
+    documents: normalized.documents.map((document) => document.id === normalized.activeDocumentId && document.profileId === normalized.activeProfileId
       ? { ...document, cv, settings, updatedAt }
       : document),
   };
