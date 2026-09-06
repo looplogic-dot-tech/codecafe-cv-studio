@@ -1,6 +1,5 @@
 import JSZip from "jszip";
 import mammoth from "mammoth";
-import PdfWorker from "pdfjs-dist/legacy/build/pdf.worker.mjs?worker&inline";
 
 export type ImportTarget = "summary" | "experience" | "coreSkills" | "tools" | "projects" | "certifications" | "education" | "languages" | "custom" | "skip";
 
@@ -39,7 +38,7 @@ export async function extractCVText(file: File): Promise<string> {
   const extension = file.name.toLowerCase().split(".").pop() || "";
   if (extension === "pdf") {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    pdfjs.GlobalWorkerOptions.workerPort = new PdfWorker();
+    pdfjs.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/legacy/build/pdf.worker.min.mjs";
     const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
     const pages: string[] = [];
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
