@@ -1,3 +1,5 @@
+import { DEFAULT_PRINT_SETTINGS, normalizePrintSettings, type CVPrintSettings } from "./workspace";
+
 export type BackupEnvelope = {
   version: 1;
   algorithm: "AES-GCM";
@@ -37,6 +39,7 @@ const GOOGLE_ROOT_FOLDER = "CodeCafe CV Studio";
 const GOOGLE_WORKSPACE_NAME = "CodeCafe-CV-Studio.workspace.json";
 const GOOGLE_TOKEN_KEY = "codecafe-google-drive-token";
 const GOOGLE_GRANT_KEY = "codecafe-google-drive-grant-known";
+const LETTER_WIDTH_MM = 215.9;
 
 export type GooglePrintableCV = {
   documentId: string;
@@ -321,6 +324,38 @@ export async function loadGoogleBackup<T>(token: string): Promise<T | null> {
   return googleRequest<T>(token, `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
 }
 
+type WorkspacePayloadShape = {
+  workspace?: {
+    documents?: Array<{
+      id?: string;
+      settings?: { print?: Partial<CVPrintSettings> };
+    }>;
+  };
+};
+
+function printSettingsFromPayload(payload: unknown, documentId: string): CVPrintSettings {
+  const workspace = (payload as WorkspacePayloadShape | null)?.workspace;
+  const print = workspace?.documents?.find((document) => document.id === documentId)?.settings?.print;
+  return print ? normalizePrintSettings(print) : { ...DEFAULT_PRINT_SETTINGS, manualBreaks: [] };
+}
+
+// El HTML portátil histórico se generaba con A4. Antes de enviarlo a Google,
+// se sustituye exclusivamente la regla de página por Letter y por los márgenes
+// del CV sincronizado. El contenido profesional no se modifica.
+export function applyLetterLayoutToPrintableHtml(
+  html: string,
+  payload: unknown,
+  documentId: string,
+): string {
+  const settings = printSettingsFromPayload(payload, documentId);
+  const pageRule = `@page{size:Letter portrait;margin:${settings.top}mm ${settings.right}mm ${settings.bottom}mm ${settings.left}mm}`;
+  const contentWidth = Math.max(120, LETTER_WIDTH_MM - settings.left - settings.right).toFixed(1);
+  const withLetterPage = /@page\{[^}]*\}/.test(html)
+    ? html.replace(/@page\{[^}]*\}/, pageRule)
+    : html.replace("<style>", `<style>${pageRule}`);
+  return withLetterPage.replace(/max-width:\s*\d+(?:\.\d+)?mm/, `max-width:${contentWidth}mm`);
+}
+
 export async function saveGoogleBackup(
   token: string,
   payload: unknown,
@@ -342,6 +377,7 @@ export async function saveGoogleBackup(
   );
 
   // Google convierte el HTML semántico en un documento que puede abrirse e imprimirse desde Drive.
+  // Se normaliza a Letter antes de la conversión para mantener el mismo papel que Print Preview.
   const documentName = printable.fileBaseName;
   const existingDocument = await findDriveItem(
     token,
@@ -354,7 +390,7 @@ export async function saveGoogleBackup(
     documentName,
     "application/vnd.google-apps.document",
     "text/html",
-    printable.html,
+    applyLetterLayoutToPrintableHtml(printable.html, payload, printable.documentId),
     collectionId,
     existingDocument,
   );
