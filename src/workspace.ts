@@ -56,6 +56,18 @@ export const defaultCollections: CVCollection[] = [
 
 const basicInfoFields: (keyof ProfileBasicInfo)[] = ["name", "email", "phone", "location", "linkedin"];
 
+export function emptyProfileBasicInfo(): ProfileBasicInfo {
+  return { name: "", email: "", phone: "", location: "", linkedin: "" };
+}
+
+function basicInfoFromCV(cv: CV, fallback: ProfileBasicInfo = emptyProfileBasicInfo()): ProfileBasicInfo {
+  const next = { ...fallback };
+  for (const field of basicInfoFields) {
+    if (cv[field]?.trim()) next[field] = cv[field];
+  }
+  return next;
+}
+
 export function newId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
@@ -69,7 +81,7 @@ function profileDocuments(documents: CVDocument[], profileId: string): CVDocumen
 
 function deriveProfileBasicInfo(documents: CVDocument[], profileId: string): ProfileBasicInfo {
   const candidates = profileDocuments(documents, profileId);
-  const basicInfo = { name: "", email: "", phone: "", location: "", linkedin: "" } satisfies ProfileBasicInfo;
+  const basicInfo = emptyProfileBasicInfo();
   for (const field of basicInfoFields) {
     const source = candidates.find((document) => document.cv[field]?.trim());
     if (source) basicInfo[field] = source.cv[field];
@@ -107,13 +119,7 @@ export function createInitialWorkspace(cv: CV, settings: CVSettings): CVWorkspac
       id: DEFAULT_PROFILE_ID,
       name: "Jaime",
       createdAt: now,
-      basicInfo: {
-        name: cv.name,
-        email: cv.email,
-        phone: cv.phone,
-        location: cv.location,
-        linkedin: cv.linkedin,
-      },
+      basicInfo: basicInfoFromCV(cv),
     }],
     activeProfileId: DEFAULT_PROFILE_ID,
   };
@@ -132,9 +138,9 @@ export function normalizeWorkspace(workspace: CVWorkspace): CVWorkspace {
     profileId: document.profileId || initialProfiles[0].id,
   }));
 
-  // Migración automática: los perfiles creados antes de basicInfo obtienen sus datos
-  // exclusivamente de CVs con el mismo profileId. En esa misma migración se rellenan
-  // campos básicos vacíos de los CVs existentes, sin sobrescribir valores ya escritos.
+  // Migración automática: perfiles de versiones anteriores obtienen sus datos base
+  // sólo de CVs con el mismo profileId. También se rellenan una sola vez los campos
+  // básicos vacíos de CVs ya existentes, sin sobrescribir información escrita.
   const newlyMigratedProfileIds = new Set<string>();
   const profiles = initialProfiles.map((profile) => {
     if (profile.basicInfo) return profile;
@@ -173,6 +179,12 @@ export function activeDocument(workspace: CVWorkspace): CVDocument {
     ?? workspace.documents[0];
 }
 
+export function activeProfileBasicInfo(workspace: CVWorkspace): ProfileBasicInfo {
+  const normalized = normalizeWorkspace(workspace);
+  return normalized.profiles?.find((profile) => profile.id === normalized.activeProfileId)?.basicInfo
+    ?? emptyProfileBasicInfo();
+}
+
 export function replaceCurrentDocument(
   workspace: CVWorkspace,
   cv: CV,
@@ -180,9 +192,14 @@ export function replaceCurrentDocument(
 ): CVWorkspace {
   const normalized = normalizeWorkspace(workspace);
   const updatedAt = new Date().toISOString();
+  const activeProfileId = normalized.activeProfileId;
+  const profiles = normalized.profiles?.map((profile) => profile.id === activeProfileId
+    ? { ...profile, basicInfo: basicInfoFromCV(cv, profile.basicInfo ?? emptyProfileBasicInfo()) }
+    : profile);
   return {
     ...normalized,
-    documents: normalized.documents.map((document) => document.id === normalized.activeDocumentId && document.profileId === normalized.activeProfileId
+    profiles,
+    documents: normalized.documents.map((document) => document.id === normalized.activeDocumentId && document.profileId === activeProfileId
       ? { ...document, cv, settings, updatedAt }
       : document),
   };
@@ -213,14 +230,19 @@ export function mergeWorkspaces(local: CVWorkspace, remote: CVWorkspace): CVWork
     const existing = documents.get(document.id);
     if (!existing || document.updatedAt > existing.updatedAt) documents.set(document.id, document);
   }
+  const mergedDocuments = [...documents.values()];
   const profiles = new Map((left.profiles ?? []).map((profile) => [profile.id, profile]));
   for (const profile of right.profiles ?? []) profiles.set(profile.id, profiles.get(profile.id) ?? profile);
+  const mergedProfiles = [...profiles.values()].map((profile) => ({
+    ...profile,
+    basicInfo: deriveProfileBasicInfo(mergedDocuments, profile.id),
+  }));
   const collections = new Map(left.collections.map((collection) => [collection.id, collection]));
   for (const collection of right.collections) collections.set(collection.id, collections.get(collection.id) ?? collection);
   return normalizeWorkspace({
     ...left,
     collections: [...collections.values()],
-    profiles: [...profiles.values()],
-    documents: [...documents.values()],
+    profiles: mergedProfiles,
+    documents: mergedDocuments,
   });
 }
