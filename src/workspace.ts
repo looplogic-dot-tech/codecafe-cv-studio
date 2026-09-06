@@ -4,10 +4,50 @@ import type { CV, Lang } from "./App";
 export const MAX_ACTIVE_CVS = 20;
 export const WORKSPACE_KEY = "codecafe-cv-workspace-v2";
 
+export type CVPrintSettings = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+  protectBreaks: boolean;
+  manualBreaks: string[];
+};
+
+export const DEFAULT_PRINT_SETTINGS: CVPrintSettings = {
+  top: 14,
+  right: 16,
+  bottom: 14,
+  left: 16,
+  protectBreaks: true,
+  manualBreaks: [],
+};
+
+export function normalizePrintSettings(value: unknown): CVPrintSettings {
+  const candidate = value && typeof value === "object" ? value as Partial<CVPrintSettings> : {};
+  const clamp = (number: unknown, fallback: number) => {
+    const parsed = Number(number);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(30, Math.max(5, Math.round(parsed * 10) / 10));
+  };
+  return {
+    top: clamp(candidate.top, DEFAULT_PRINT_SETTINGS.top),
+    right: clamp(candidate.right, DEFAULT_PRINT_SETTINGS.right),
+    bottom: clamp(candidate.bottom, DEFAULT_PRINT_SETTINGS.bottom),
+    left: clamp(candidate.left, DEFAULT_PRINT_SETTINGS.left),
+    protectBreaks: candidate.protectBreaks !== false,
+    manualBreaks: Array.isArray(candidate.manualBreaks)
+      ? candidate.manualBreaks.filter((item): item is string => typeof item === "string")
+      : [],
+  };
+}
+
 export type CVSettings = {
   lang: Lang;
   template: "ats" | "modern";
   photoOn: boolean;
+  // La configuración de impresión viaja con el CV para que teléfono, EC2 y Drive
+  // compartan los mismos márgenes y saltos. Sigue siendo opcional para CVs antiguos.
+  print?: CVPrintSettings;
 };
 
 export type CVCollection = {
@@ -99,6 +139,16 @@ function fillMissingBasicInfo(cv: CV, basicInfo: ProfileBasicInfo): CV {
   return next;
 }
 
+function persistedPrintSettings(documentId: string): CVPrintSettings | undefined {
+  try {
+    const stored = JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null") as CVWorkspace | null;
+    const print = stored?.documents?.find((document) => document.id === documentId)?.settings?.print;
+    return print ? normalizePrintSettings(print) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createInitialWorkspace(cv: CV, settings: CVSettings): CVWorkspace {
   const now = new Date().toISOString();
   const document: CVDocument = {
@@ -183,10 +233,22 @@ export function replaceCurrentDocument(
 ): CVWorkspace {
   const normalized = normalizeWorkspace(workspace);
   const updatedAt = new Date().toISOString();
+  const persistedPrint = persistedPrintSettings(normalized.activeDocumentId);
   return {
     ...normalized,
     documents: normalized.documents.map((document) => document.id === normalized.activeDocumentId && document.profileId === normalized.activeProfileId
-      ? { ...document, cv, settings, updatedAt }
+      ? {
+        ...document,
+        cv,
+        // Conserva campos opcionales ya asociados al documento y, en particular,
+        // los ajustes de impresión guardados directamente por Print Preview.
+        settings: {
+          ...document.settings,
+          ...settings,
+          ...(persistedPrint ? { print: persistedPrint } : {}),
+        },
+        updatedAt,
+      }
       : document),
   };
 }
