@@ -24,6 +24,7 @@ import {
 import CVLibrary from "./CVLibrary";
 import CVImporter from "./CVImporter";
 import type { ImportedBlock } from "./cvImport";
+import packageInfo from "../package.json";
 import {
   activeDocument,
   createInitialWorkspace,
@@ -40,12 +41,12 @@ import {
 type Job = { role: string; company: string; dates: string; bullets: string };
 type Project = { name: string; stack: string; description: string; repository?: string };
 type CustomSection = { title: string; content: string };
-export type SectionId = "profile" | "experience" | "core_skills" | "tools" | "projects" | "certifications" | "skills" | "education" | "languages" | "about";
+export type SectionId = "profile" | "experience" | "core_skills" | "tools" | "projects" | "certifications" | "skills" | "education" | "languages";
 export type SectionTitles = Partial<Record<SectionId, string>>;
 export type CV = {
   name: string; title: string; email: string; phone: string; location: string; linkedin: string;
   summary: string; skills: string; coreSkills: string; tools: string; certifications: string;
-  education: string; languages: string; about?: string; jobs: Job[]; projects: Project[]; customSections: CustomSection[]; photo: string;
+  education: string; languages: string; jobs: Job[]; projects: Project[]; customSections: CustomSection[]; photo: string;
   sectionTitles?: SectionTitles;
 };
 export type Lang = "es" | "en";
@@ -82,7 +83,6 @@ const seed: CV = {
     { name: "Proyecto demostrativo", stack: "JavaScript · HTML · CSS", description: "Herramienta de ejemplo para organizar información y simplificar un proceso operativo.", repository: "" },
   ],
   customSections: [],
-  about: "",
 };
 
 const blankCV: CV = {
@@ -91,7 +91,6 @@ const blankCV: CV = {
   jobs: [{ role: "", company: "", dates: "", bullets: "" }],
   projects: [],
   customSections: [],
-  about: "",
 };
 
 const copy = {
@@ -134,7 +133,10 @@ const copy = {
     customSections: "Secciones personalizadas", customSection: "Sección personalizada", sectionTitle: "Título de la sección",
     sectionContent: "Contenido", addCustomSection: "＋ Añadir sección personalizada", resetTitle: "Restablecer título",
     toolsHint: "Pega una categoría por línea con el formato Categoría: contenido. El texto anterior también funciona.",
-    importCv: "Importar CV", about: "Acerca de", aboutHeading: "Acerca de",
+    importCv: "Importar CV", aboutApp: "Acerca de", aboutAppTitle: "Acerca de CodeCafe CV Studio",
+    aboutDescription: "Aplicación para crear, organizar, importar y exportar currículums profesionales bilingües y compatibles con ATS.",
+    developedBy: "Diseñado y desarrollado por", version: "Versión", rights: "© 2026 CodeCafe. Todos los derechos reservados.",
+    profileUser: "Perfil", newProfile: "Crear perfil", profileName: "Nombre de la persona:",
   },
   en: {
     tagline: "Your experience, clearly presented.", save: "Save", saved: "✓ Saved", pdf: "Download PDF",
@@ -175,7 +177,10 @@ const copy = {
     customSections: "Custom sections", customSection: "Custom section", sectionTitle: "Section title",
     sectionContent: "Content", addCustomSection: "＋ Add custom section", resetTitle: "Reset title",
     toolsHint: "Paste one category per line as Category: content. Existing plain text still works.",
-    importCv: "Import résumé", about: "About", aboutHeading: "About",
+    importCv: "Import résumé", aboutApp: "About", aboutAppTitle: "About CodeCafe CV Studio",
+    aboutDescription: "An application for creating, organizing, importing, and exporting professional bilingual ATS-friendly résumés.",
+    developedBy: "Designed and developed by", version: "Version", rights: "© 2026 CodeCafe. All rights reserved.",
+    profileUser: "Profile", newProfile: "Create profile", profileName: "Person's name:",
   },
 } as const;
 
@@ -270,7 +275,6 @@ function buildPrintableHtml(cv: CV, lang: Lang, labels: (typeof copy)[Lang]): st
   <style>@page{size:A4;margin:18mm}body{font-family:Arial,sans-serif;color:#172033;font-size:10.5pt;line-height:1.42;max-width:178mm;margin:auto}header{border-bottom:3px solid #3157a4;padding-bottom:10px}h1{font-size:25pt;margin:0;color:#193467}header h2{border:0;margin:3px 0;font-size:14pt}header p{margin:3px 0}section{margin-top:14px}section h2{font-size:11pt;letter-spacing:.08em;text-transform:uppercase;color:#3157a4;border-bottom:1px solid #cbd5e1;padding-bottom:3px}p{margin:4px 0}.entry{break-inside:avoid;margin:8px 0}.entry h3{font-size:10.5pt;margin:0}.entry time{color:#526071}ul{margin:4px 0 0 18px;padding:0}li{margin:2px 0}.tool-category{break-inside:avoid;margin:0 0 7px}.tool-category strong{display:block;color:#39465a;font-size:9.5pt}.tool-category p{margin:1px 0 0}</style></head><body>
   <header><h1>${escapeHtml(cv.name)}</h1><h2>${escapeHtml(cv.title)}</h2><p>${[cv.email, cv.phone, cv.location].filter(Boolean).map(escapeHtml).join(" · ")}</p>${cv.linkedin ? `<p>${escapeHtml(cv.linkedin)}</p>` : ""}</header>
   ${section(title("profile", labels.profileHeading), cv.summary ? `<p>${escapeHtml(cv.summary)}</p>` : "")}
-  ${section(title("about", labels.aboutHeading), printableStructuredLines(cv.about || ""))}
   ${section(title("experience", labels.experienceHeading), jobs)}
   ${section(title("core_skills", labels.coreHeading), printableStructuredLines(cv.coreSkills))}
   ${section(title("tools", labels.toolsHeading), cv.tools ? printableTools(cv.tools) : "")}
@@ -309,6 +313,7 @@ export default function Home() {
   const [draftName, setDraftName] = useState("");
   const [draftCollection, setDraftCollection] = useState("general");
   const [importOpen, setImportOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const t = copy[lang];
 
   useEffect(() => {
@@ -380,7 +385,7 @@ export default function Home() {
         } else if (block.target === "projects") {
           next.projects.push({ name: block.heading, stack: "", description: block.text, repository: "" });
         } else if (block.target !== "skip") {
-          const key = block.target as "summary" | "coreSkills" | "tools" | "certifications" | "education" | "languages" | "about";
+          const key = block.target as "summary" | "coreSkills" | "tools" | "certifications" | "education" | "languages";
           next[key] = append(next[key], block.text);
         }
       }
@@ -575,6 +580,39 @@ export default function Home() {
     setLibraryOpen(false);
     setCloudStatus("local");
   };
+  const switchProfile = (profileId: string) => {
+    const preserved = workspaceWithCurrent();
+    const document = preserved.documents.find((candidate) => candidate.profileId === profileId && !candidate.archived);
+    if (!document) return;
+    const updated = { ...preserved, activeProfileId: profileId, activeDocumentId: document.id };
+    setWorkspace(updated);
+    saveWorkspaceLocal(updated);
+    loadDocumentIntoEditor(document);
+    setCloudStatus("local");
+  };
+  const createProfile = () => {
+    if (workspace.documents.length >= MAX_ACTIVE_CVS) return;
+    const name = window.prompt(t.profileName)?.trim();
+    if (!name) return;
+    const preserved = workspaceWithCurrent();
+    const now = new Date().toISOString();
+    const profileId = newId("profile");
+    const document: CVDocument = {
+      id: newId("cv"), name: `${name} — CV`, collectionId: "general", cv: structuredClone(blankCV),
+      settings: { lang, template: "ats", photoOn: false }, createdAt: now, updatedAt: now, archived: false, profileId,
+    };
+    const updated = {
+      ...preserved,
+      profiles: [...(preserved.profiles ?? []), { id: profileId, name, createdAt: now }],
+      activeProfileId: profileId,
+      activeDocumentId: document.id,
+      documents: [...preserved.documents, document],
+    };
+    setWorkspace(updated);
+    saveWorkspaceLocal(updated);
+    loadDocumentIntoEditor(document);
+    setCloudStatus("local");
+  };
   const createDocument = () => {
     if (!draftName.trim() || workspace.documents.length >= MAX_ACTIVE_CVS) return;
     const preserved = workspaceWithCurrent();
@@ -589,6 +627,7 @@ export default function Home() {
       createdAt: now,
       updatedAt: now,
       archived: false,
+      profileId: preserved.activeProfileId,
     };
     const updated = { ...preserved, documents: [...preserved.documents, document], activeDocumentId: document.id };
     setWorkspace(updated);
@@ -690,7 +729,6 @@ export default function Home() {
     const sections = [
       `${cv.name}\n${cv.title}\n${cv.email} | ${cv.phone} | ${cv.location}\n${cv.linkedin}`,
       `${sectionTitle("profile", t.profileHeading).toUpperCase()}\n${cv.summary}`,
-      cv.about && `${sectionTitle("about", t.aboutHeading).toUpperCase()}\n${cv.about}`,
       `${sectionTitle("experience", t.experienceHeading).toUpperCase()}\n${cv.jobs.map((j) => `${j.role} — ${j.company} (${j.dates})\n${j.bullets}`).join("\n\n")}`,
       cv.coreSkills && `${sectionTitle("core_skills", t.coreHeading).toUpperCase()}\n${cv.coreSkills}`,
       cv.tools && `${sectionTitle("tools", t.toolsHeading).toUpperCase()}\n${cv.tools}`,
@@ -711,9 +749,11 @@ export default function Home() {
       <header className="topbar">
         <div className="brand"><span className="brandMark">C</span><div><strong>CodeCafe CV</strong><small>{t.tagline}</small></div></div>
         <div className="topActions">
+          <div className="profileSwitch"><label>{t.profileUser}<select value={workspace.activeProfileId} onChange={(event) => switchProfile(event.target.value)}>{(workspace.profiles ?? []).map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select></label><button onClick={createProfile} title={t.newProfile} aria-label={t.newProfile}>＋</button></div>
           <div className="langSwitch" aria-label={t.docLanguage}><button className={lang === "es" ? "selected" : ""} onClick={() => setLang("es")}>ES</button><button className={lang === "en" ? "selected" : ""} onClick={() => setLang("en")}>EN</button></div>
           <button className="libraryButton" onClick={() => setLibraryOpen(true)} title={`${t.myCvs}: ${activeDocument(workspace).name}`}>▤ <span>{t.myCvs}</span></button>
           <button className="libraryButton" onClick={() => setImportOpen(true)}>⇩ <span>{t.importCv}</span></button>
+          <button className="libraryButton" onClick={() => setAboutOpen(true)}>ⓘ <span>{t.aboutApp}</span></button>
           <button className={`cloudButton ${cloudStatus}`} onClick={() => setCloudOpen(true)} title={t.cloud}>☁ <span>{cloudStatusText}</span></button>
           <button className="ghost" onClick={save}>{saved ? t.saved : t.save}</button>
           <button className="primary" onClick={() => window.print()}>{t.pdf}</button>
@@ -735,7 +775,6 @@ export default function Home() {
             <Field label={t.location} wide><input className={inputClass} value={cv.location} onChange={(e) => set("location", e.target.value)} /></Field>
             <Field label={t.link} wide><input className={inputClass} value={cv.linkedin} onChange={(e) => set("linkedin", e.target.value)} /></Field>
             <Field label={t.summary} wide><textarea className={inputClass} rows={6} value={cv.summary} onChange={(e) => set("summary", e.target.value)} /><small className="hint">{t.summaryHint}</small></Field>
-            <Field label={t.about} wide><textarea className={inputClass} rows={4} value={cv.about ?? ""} onChange={(e) => set("about", e.target.value)} /></Field>
           </div>}
 
           {tab === "experiencia" && <div className="stack">
@@ -794,7 +833,6 @@ export default function Home() {
             <div className="cvHeader">{photoOn && cv.photo && <img className="portrait" src={cv.photo} alt={t.includePhoto} />}<div><h2>{cv.name || t.fullName}</h2><h3>{cv.title || t.professionalTitle}</h3><p>{[cv.email, cv.phone, cv.location].filter(Boolean).join("  ·  ")}</p>{cv.linkedin && <p>{cv.linkedin}</p>}</div></div>
             <CVSection title={sectionTitle("profile", t.profileHeading)} defaultTitle={t.profileHeading} onTitleChange={(value) => setSectionTitle("profile", value)} resetLabel={t.resetTitle}><p>{cv.summary}</p></CVSection>
             <CVSection title={sectionTitle("experience", t.experienceHeading)} defaultTitle={t.experienceHeading} onTitleChange={(value) => setSectionTitle("experience", value)} resetLabel={t.resetTitle}>{cv.jobs.map((job, i) => <div className="cvJob" key={i}><div className="jobHeading"><div><b>{job.role}</b><span><BoldInlineText value={job.company} /></span></div><time>{job.dates}</time></div><ul>{lines(job.bullets).map((bullet, n) => <li key={n}>{bullet}</li>)}</ul></div>)}</CVSection>
-            {cv.about && <CVSection title={sectionTitle("about", t.aboutHeading)} defaultTitle={t.aboutHeading} onTitleChange={(value) => setSectionTitle("about", value)} resetLabel={t.resetTitle}><StructuredLines value={cv.about} /></CVSection>}
             {cv.coreSkills && <CVSection title={sectionTitle("core_skills", t.coreHeading)} defaultTitle={t.coreHeading} onTitleChange={(value) => setSectionTitle("core_skills", value)} resetLabel={t.resetTitle}><StructuredLines value={cv.coreSkills} /></CVSection>}
             {cv.tools && <CVSection title={sectionTitle("tools", t.toolsHeading)} defaultTitle={t.toolsHeading} onTitleChange={(value) => setSectionTitle("tools", value)} resetLabel={t.resetTitle}><ToolCategories value={cv.tools} /></CVSection>}
             {cv.projects.some((p) => p.name || p.description || p.repository) && <CVSection title={sectionTitle("projects", t.projectsHeading)} defaultTitle={t.projectsHeading} onTitleChange={(value) => setSectionTitle("projects", value)} resetLabel={t.resetTitle}>{cv.projects.filter((p) => p.name || p.description || p.repository).map((project, i) => <div className="cvProject" key={i}><div><b>{project.name}</b><span>{project.stack}</span></div><StructuredLines value={project.description} />{project.repository && <p className="repository"><b>{t.repository}:</b> {/^https?:\/\//i.test(project.repository) ? <a href={project.repository}>{project.repository}</a> : project.repository}</p>}</div>)}</CVSection>}
@@ -831,6 +869,17 @@ export default function Home() {
         onClose={() => setLibraryOpen(false)}
       />}
       {importOpen && <CVImporter lang={lang} onInsert={insertImportedBlocks} onClose={() => setImportOpen(false)} />}
+      {aboutOpen && <div className="aboutOverlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAboutOpen(false); }}>
+        <section className="aboutPanel" role="dialog" aria-modal="true" aria-labelledby="about-title">
+          <div className="aboutHead"><div className="aboutLogo">C</div><button onClick={() => setAboutOpen(false)} aria-label={t.close}>×</button></div>
+          <span className="eyebrow">CODECAFE SOFTWARE</span><h2 id="about-title">{t.aboutAppTitle}</h2>
+          <div className="aboutVersion">{t.version} {packageInfo.version}</div>
+          <p>{t.aboutDescription}</p>
+          <div className="aboutAuthor"><span>{t.developedBy}</span><strong>Jaime Sánchez Sáenz</strong></div>
+          <p className="aboutRights">{t.rights}</p>
+          <button className="primary" onClick={() => setAboutOpen(false)}>{t.close}</button>
+        </section>
+      </div>}
       {cloudOpen && <div className="cloudOverlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCloudOpen(false); }}>
         <section className="cloudPanel" role="dialog" aria-modal="true" aria-labelledby="cloud-title">
           <div className="cloudHead"><div><span className="eyebrow">CODECAFE CLOUD</span><h2 id="cloud-title">{t.cloudTitle}</h2></div><button onClick={() => setCloudOpen(false)} aria-label={t.close}>×</button></div>

@@ -1,8 +1,8 @@
 import JSZip from "jszip";
 import mammoth from "mammoth";
-import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
+import PdfWorker from "pdfjs-dist/legacy/build/pdf.worker.mjs?worker&inline";
 
-export type ImportTarget = "summary" | "experience" | "coreSkills" | "tools" | "projects" | "certifications" | "education" | "languages" | "about" | "custom" | "skip";
+export type ImportTarget = "summary" | "experience" | "coreSkills" | "tools" | "projects" | "certifications" | "education" | "languages" | "custom" | "skip";
 
 export type ImportedBlock = {
   id: string;
@@ -21,7 +21,6 @@ const targetPatterns: Array<[ImportTarget, RegExp]> = [
   ["certifications", /^(certificaciones|cursos|certifications|courses|training)/i],
   ["education", /^(educaci[oó]n|formaci[oó]n acad[eé]mica|education|academic)/i],
   ["languages", /^(idiomas|languages)/i],
-  ["about", /^(acerca de|sobre m[ií]|about|additional information)/i],
 ];
 
 function xmlText(xml: string): string {
@@ -40,7 +39,7 @@ export async function extractCVText(file: File): Promise<string> {
   const extension = file.name.toLowerCase().split(".").pop() || "";
   if (extension === "pdf") {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+    pdfjs.GlobalWorkerOptions.workerPort = new PdfWorker();
     const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
     const pages: string[] = [];
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {

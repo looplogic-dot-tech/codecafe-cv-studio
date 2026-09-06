@@ -16,7 +16,6 @@ const targets: Array<[ImportTarget, string, string]> = [
   ["certifications", "Certificaciones", "Certifications"],
   ["education", "Educación", "Education"],
   ["languages", "Idiomas", "Languages"],
-  ["about", "Acerca de", "About"],
   ["custom", "Nueva sección", "New section"],
   ["skip", "No insertar", "Do not insert"],
 ];

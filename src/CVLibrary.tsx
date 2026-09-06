@@ -70,9 +70,11 @@ type Props = {
 
 export default function CVLibrary(props: Props) {
   const t = libraryCopy[props.lang];
-  const activeCount = props.workspace.documents.filter((document) => !document.archived).length;
+  const activeProfileId = props.workspace.activeProfileId;
+  const profileDocuments = props.workspace.documents.filter((document) => document.profileId === activeProfileId);
+  const activeCount = profileDocuments.filter((document) => !document.archived).length;
   const totalCount = props.workspace.documents.length;
-  const documents = props.workspace.documents
+  const documents = profileDocuments
     .filter((document) => props.showArchived
       ? document.archived
       : !document.archived && (props.selectedCollection === "all" || document.collectionId === props.selectedCollection))
@@ -93,9 +95,9 @@ export default function CVLibrary(props: Props) {
       <div className="libraryBody">
         <nav className="collectionNav">
           <button className={!props.showArchived && props.selectedCollection === "all" ? "selected" : ""} onClick={() => { props.onShowArchived(false); props.onSelectCollection("all"); }}>{t.active}<span>{activeCount}</span></button>
-          {[...props.workspace.collections].sort((a, b) => a.order - b.order).map((collection) => <button key={collection.id} className={!props.showArchived && props.selectedCollection === collection.id ? "selected" : ""} onClick={() => { props.onShowArchived(false); props.onSelectCollection(collection.id); }}>{collection.name}<span>{props.workspace.documents.filter((document) => !document.archived && document.collectionId === collection.id).length}</span></button>)}
+          {[...props.workspace.collections].sort((a, b) => a.order - b.order).map((collection) => <button key={collection.id} className={!props.showArchived && props.selectedCollection === collection.id ? "selected" : ""} onClick={() => { props.onShowArchived(false); props.onSelectCollection(collection.id); }}>{collection.name}<span>{profileDocuments.filter((document) => !document.archived && document.collectionId === collection.id).length}</span></button>)}
           <button onClick={props.onCreateCollection}>＋ {t.newCollection}</button>
-          <button className={props.showArchived ? "selected" : ""} onClick={() => props.onShowArchived(true)}>{t.archived}<span>{props.workspace.documents.filter((document) => document.archived).length}</span></button>
+          <button className={props.showArchived ? "selected" : ""} onClick={() => props.onShowArchived(true)}>{t.archived}<span>{profileDocuments.filter((document) => document.archived).length}</span></button>
         </nav>
         <div className="cvCardGrid">
           {documents.length === 0 && <p className="libraryEmpty">{t.empty}</p>}

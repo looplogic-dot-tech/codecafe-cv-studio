@@ -94,12 +94,22 @@ class FrontendContractTests(unittest.TestCase):
         for extension in ('"pdf"', '"docx"', '"odt"', '"ods"'):
             self.assertIn(extension, extraction)
 
-    def test_about_and_company_bold_remain_optional(self):
+    def test_application_about_and_company_bold(self):
         app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
-        self.assertIn("about?: string", app)
-        self.assertIn('sectionTitle("about", t.aboutHeading)', app)
+        self.assertIn("Acerca de CodeCafe CV Studio", app)
+        self.assertIn("Jaime Sánchez Sáenz", app)
+        self.assertNotIn("about?: string", app)
         self.assertIn("function BoldInlineText", app)
         self.assertIn("printableBoldInline(job.company)", app)
+
+    def test_profiles_are_visible_and_isolate_documents(self):
+        app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+        library = (ROOT / "src" / "CVLibrary.tsx").read_text(encoding="utf-8")
+        self.assertIn('className="profileSwitch"', app)
+        self.assertIn("const switchProfile", app)
+        self.assertIn("const createProfile", app)
+        self.assertIn("profileId: preserved.activeProfileId", app)
+        self.assertIn("document.profileId === activeProfileId", library)
 
 
 if __name__ == "__main__":
