@@ -33,6 +33,16 @@ class DeploySafetyTests(unittest.TestCase):
         deploy_index = updater.index("update-v1.2.0.sh")
         self.assertLess(preflight_index, deploy_index)
 
+    def test_underlying_deployer_also_uses_real_data_directory_and_validates_backup(self):
+        updater = (ROOT / "deploy" / "update-v1.2.0.sh").read_text(encoding="utf-8")
+        self.assertIn('/etc/codecafe-cv-sync.env', updater)
+        self.assertIn('CODECAFE_CV_DATA_DIR', updater)
+        self.assertIn('database_path="${data_dir}/backups.sqlite3"', updater)
+        self.assertIn('database_backup_dir="${data_dir}/deployment-backups"', updater)
+        self.assertNotIn('/var/lib/codecafe-cv-sync/backups.sqlite3', updater)
+        self.assertGreaterEqual(updater.count("PRAGMA quick_check"), 2)
+        self.assertIn("latest != copied_latest", updater)
+
 
 if __name__ == "__main__":
     unittest.main()
