@@ -56,6 +56,20 @@ export const defaultCollections: CVCollection[] = [
 
 const basicInfoFields: (keyof ProfileBasicInfo)[] = ["name", "email", "phone", "location", "linkedin"];
 
+export function emptyProfileBasicInfo(): ProfileBasicInfo {
+  return { name: "", email: "", phone: "", location: "", linkedin: "" };
+}
+
+function basicInfoFromCV(cv: CV): ProfileBasicInfo {
+  return {
+    name: cv.name,
+    email: cv.email,
+    phone: cv.phone,
+    location: cv.location,
+    linkedin: cv.linkedin,
+  };
+}
+
 export function newId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
@@ -69,7 +83,7 @@ function profileDocuments(documents: CVDocument[], profileId: string): CVDocumen
 
 function deriveProfileBasicInfo(documents: CVDocument[], profileId: string): ProfileBasicInfo {
   const candidates = profileDocuments(documents, profileId);
-  const basicInfo = { name: "", email: "", phone: "", location: "", linkedin: "" } satisfies ProfileBasicInfo;
+  const basicInfo = emptyProfileBasicInfo();
   for (const field of basicInfoFields) {
     const source = candidates.find((document) => document.cv[field]?.trim());
     if (source) basicInfo[field] = source.cv[field];
@@ -103,18 +117,7 @@ export function createInitialWorkspace(cv: CV, settings: CVSettings): CVWorkspac
     collections: defaultCollections,
     documents: [document],
     activeDocumentId: document.id,
-    profiles: [{
-      id: DEFAULT_PROFILE_ID,
-      name: "Jaime",
-      createdAt: now,
-      basicInfo: {
-        name: cv.name,
-        email: cv.email,
-        phone: cv.phone,
-        location: cv.location,
-        linkedin: cv.linkedin,
-      },
-    }],
+    profiles: [{ id: DEFAULT_PROFILE_ID, name: "Jaime", createdAt: now, basicInfo: basicInfoFromCV(cv) }],
     activeProfileId: DEFAULT_PROFILE_ID,
   };
 }
@@ -132,9 +135,9 @@ export function normalizeWorkspace(workspace: CVWorkspace): CVWorkspace {
     profileId: document.profileId || initialProfiles[0].id,
   }));
 
-  // Migración automática: los perfiles creados antes de basicInfo obtienen sus datos
-  // exclusivamente de CVs con el mismo profileId. En esa misma migración se rellenan
-  // campos básicos vacíos de los CVs existentes, sin sobrescribir valores ya escritos.
+  // Migración automática: cada perfil obtiene datos básicos únicamente de CVs con el
+  // mismo profileId. Los CVs existentes reciben esos valores sólo si el campo está vacío.
+  // Los valores heredados siguen siendo campos normales y editables en cada CV.
   const newlyMigratedProfileIds = new Set<string>();
   const profiles = initialProfiles.map((profile) => {
     if (profile.basicInfo) return profile;

@@ -95,7 +95,6 @@ export default function CVLibrary(props: Props) {
       {props.creationMode && <div className="createCvPanel">
         <label>{t.newName}<input className="inputField" value={props.draftName} onChange={(event) => props.onDraftName(event.target.value)} /></label>
         <label>{t.collection}<select className="inputField" value={props.draftCollection} onChange={(event) => props.onDraftCollection(event.target.value)}>{[...props.workspace.collections].sort((a, b) => a.order - b.order).map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></label>
-        {props.creationMode === "blank" && <label className="inheritBasics"><input type="checkbox" checked={props.inheritBasics} onChange={(event) => props.onInheritBasics(event.target.checked)} />{t.inheritBasics}</label>}
         <div><button className="primary" disabled={!props.draftName.trim()} onClick={props.onCreate}>{t.create}</button><button onClick={props.onCancelCreate}>{t.cancel}</button></div>
       </div>}
       <div className="libraryBody">

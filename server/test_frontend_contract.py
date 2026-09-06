@@ -135,9 +135,10 @@ class FrontendContractTests(unittest.TestCase):
         library = (ROOT / "src" / "CVLibrary.tsx").read_text(encoding="utf-8")
         self.assertIn("mergeWorkspaces(preserved, backup.workspace)", app)
         self.assertIn("export function mergeWorkspaces", workspace)
-        self.assertIn("inheritBasics ?", app)
-        self.assertIn("current.cv.name", app)
-        self.assertIn("Heredar datos básicos de este perfil", library)
+        self.assertIn("deriveProfileBasicInfo(assignedDocuments, profile.id)", workspace)
+        self.assertIn("fillMissingBasicInfo(document.cv, basicInfo)", workspace)
+        self.assertIn("document.profileId === profileId", workspace)
+        self.assertNotIn('className="inheritBasics"', library)
         self.assertIn("contacto@codecafe.io", app)
         self.assertIn("Sincronizar ahora", app)
 
