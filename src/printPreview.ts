@@ -11,6 +11,7 @@ const STYLE_ID = "codecafe-print-settings-style";
 const LAUNCHER_ID = "codecafe-print-preview-launcher";
 const OVERLAY_ID = "codecafe-print-setup";
 const PREVIEW_SCALE = 0.55;
+const A4_HEIGHT_PX = 1123;
 
 const presets: Record<string, Omit<PrintSettings, "protectBreaks">> = {
   compact: { top: 10, right: 12, bottom: 10, left: 12 },
@@ -136,10 +137,10 @@ function buildPreview(settings: PrintSettings, host: HTMLElement): void {
   host.append(frame);
 
   requestAnimationFrame(() => {
-    const unscaledHeight = Math.max(page.scrollHeight / PREVIEW_SCALE, 1123);
-    const pages = Math.max(1, Math.ceil(unscaledHeight / 1123));
-    guides.style.height = `${pages * 1123}px`;
-    frame.style.height = `${Math.max(page.scrollHeight, pages * 1123 * PREVIEW_SCALE)}px`;
+    const unscaledHeight = Math.max(page.scrollHeight, A4_HEIGHT_PX);
+    const pages = Math.max(1, Math.ceil(unscaledHeight / A4_HEIGHT_PX));
+    guides.style.height = `${pages * A4_HEIGHT_PX}px`;
+    frame.style.height = `${Math.max(unscaledHeight, pages * A4_HEIGHT_PX) * PREVIEW_SCALE}px`;
   });
 }
 
