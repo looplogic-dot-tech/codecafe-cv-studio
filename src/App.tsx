@@ -198,23 +198,29 @@ export type ToolLine = { category: string; content: string };
 // Interpreta cada renglón al renderizarlo; el texto original nunca se reemplaza ni migra.
 export function parseToolLines(value: string): ToolLine[] {
   return value.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+    const markdownBold = line.match(/^\*\*(.+?)\*\*(.*)$/);
+    if (markdownBold) {
+      const category = markdownBold[1].trim().replace(/:$/, "");
+      const content = markdownBold[2].trim();
+      return { category, content };
+    }
     const separator = line.indexOf(":");
     if (separator <= 0) return { category: "", content: line };
     const category = line.slice(0, separator).trim();
     const content = line.slice(separator + 1).trim();
-    return category && content ? { category, content } : { category: "", content: line };
+    return category ? { category, content } : { category: "", content: line };
   });
 }
 
 function printableTools(value: string): string {
   return parseToolLines(value).map(({ category, content }) => category
-    ? `<div class="tool-category"><strong>${escapeHtml(category)}</strong><p>${escapeHtml(content)}</p></div>`
+    ? `<div class="tool-category"><strong>${escapeHtml(category)}</strong>${content ? `<p>${escapeHtml(content)}</p>` : ""}</div>`
     : `<p>${escapeHtml(content)}</p>`).join("");
 }
 
 function printableStructuredLines(value: string): string {
   return parseToolLines(value).map(({ category, content }) => category
-    ? `<p><strong>${escapeHtml(category)}:</strong> ${escapeHtml(content)}</p>`
+    ? `<p><strong>${escapeHtml(category)}${content ? ":" : ""}</strong>${content ? ` ${escapeHtml(content)}` : ""}</p>`
     : `<p>${escapeHtml(content)}</p>`).join("");
 }
 
@@ -816,7 +822,7 @@ function ToolCategories({ value }: { value: string }) {
 }
 
 function StructuredLines({ value }: { value: string }) {
-  return <>{parseToolLines(value).map((line, index) => <p className="structuredLine" key={index}>{line.category ? <><b>{line.category}:</b> {line.content}</> : line.content}</p>)}</>;
+  return <>{parseToolLines(value).map((line, index) => <p className="structuredLine" key={index}>{line.category ? <><b>{line.category}{line.content ? ":" : ""}</b>{line.content && <> {line.content}</>}</> : line.content}</p>)}</>;
 }
 
 function CVSection({ title, defaultTitle, onTitleChange, resetLabel, children }: { title: string; defaultTitle?: string; onTitleChange?: (value: string) => void; resetLabel?: string; children: React.ReactNode }) {

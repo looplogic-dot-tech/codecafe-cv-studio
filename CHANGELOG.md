@@ -1,5 +1,11 @@
 # Historial de versiones
 
+## 1.4.2 — 2026-09-06
+
+- Reconoce líneas completas escritas como `**Encabezado**` y las presenta en negrita.
+- Reconoce etiquetas como `**Credencial:** contenido` y limita la negrita a la etiqueta.
+- Mantiene también la sintaxis rápida `Encabezado: contenido` de versiones anteriores.
+
 ## 1.4.1 — 2026-09-06
 
 - Añade un campo opcional de repositorio a cada proyecto y lo incluye en vista previa, impresión, PDF, Drive y texto ATS.

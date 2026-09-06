@@ -71,7 +71,9 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('type="url"', app)
         self.assertIn("printableRepository(project.repository, labels.repository)", app)
         self.assertIn("function StructuredLines", app)
-        self.assertIn("<b>{line.category}:</b>", app)
+        self.assertIn("markdownBold", app)
+        self.assertIn('line.match(/^\\*\\*(.+?)\\*\\*(.*)$/)', app)
+        self.assertIn('line.content ? ":" : ""', app)
 
 
 if __name__ == "__main__":
