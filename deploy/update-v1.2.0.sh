@@ -7,7 +7,7 @@ set -euo pipefail
 source_dir="/opt/codecafe-studio/apps/codecafe-cv-studio-source"
 web_root="/opt/codecafe-studio/apps/codecafe-cv-studio"
 server_program="${source_dir}/server/app.py"
-previous_commit="bb7fc56b11fbc45ee204bd2c82a10a01bfcb60af"
+previous_commit="a6eeb2f626c8f47385386e189347bb3f3153e486"
 
 # Evita modificar archivos si el bloque no fue ejecutado mediante sudo.
 if [[ "${EUID}" -ne 0 ]]; then
