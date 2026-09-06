@@ -65,6 +65,14 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("@media print", styles)
         self.assertIn(".editableSectionTitle button{display:none!important}", styles)
 
+    def test_projects_keep_optional_repository_and_structured_headings(self):
+        app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+        self.assertIn("repository?: string", app)
+        self.assertIn('type="url"', app)
+        self.assertIn("printableRepository(project.repository, labels.repository)", app)
+        self.assertIn("function StructuredLines", app)
+        self.assertIn("<b>{line.category}:</b>", app)
+
 
 if __name__ == "__main__":
     unittest.main()

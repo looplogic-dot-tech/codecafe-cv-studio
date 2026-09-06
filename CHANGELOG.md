@@ -1,5 +1,11 @@
 # Historial de versiones
 
+## 1.4.1 — 2026-09-06
+
+- Añade un campo opcional de repositorio a cada proyecto y lo incluye en vista previa, impresión, PDF, Drive y texto ATS.
+- Reconoce `Encabezado: contenido` en campos multilínea y presenta el encabezado en negrita sin almacenar HTML.
+- Conserva proyectos y textos anteriores aunque no contengan repositorio ni encabezados estructurados.
+
 ## 1.4.0 — 2026-09-06
 
 - Presenta `Herramientas y tecnologías` por categorías compactas cuando cada línea usa `Categoría: contenido`.
