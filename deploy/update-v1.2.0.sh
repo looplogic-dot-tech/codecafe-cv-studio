@@ -7,6 +7,7 @@ set -euo pipefail
 source_dir="/opt/codecafe-studio/apps/codecafe-cv-studio-source"
 web_root="/opt/codecafe-studio/apps/codecafe-cv-studio"
 server_program="${source_dir}/server/app.py"
+environment_file="/etc/codecafe-cv-sync.env"
 previous_commit="a6eeb2f626c8f47385386e189347bb3f3153e486"
 
 # Evita modificar archivos si el bloque no fue ejecutado mediante sudo.
@@ -21,7 +22,8 @@ for required in \
     "${source_dir}/dist/assets" \
     "${source_dir}/package.json" \
     "${server_program}" \
-    "${web_root}/index.html"; do
+    "${web_root}/index.html" \
+    "${environment_file}"; do
     if [[ ! -e "${required}" ]]; then
         echo "DETENIDO: falta el recurso esperado ${required}" >&2
         exit 1
@@ -39,26 +41,73 @@ esac
 # Se conserva fuera del nombre activo para poder restaurarlo si el reinicio falla.
 timestamp="$(date -u +%Y%m%d-%H%M%S)"
 
-# Conserva una copia íntegra de la base de revisiones antes de reiniciar el servicio.
-database_path="/var/lib/codecafe-cv-sync/backups.sqlite3"
-database_backup_dir="/var/lib/codecafe-cv-sync/deployment-backups"
+# Obtiene la ruta real de datos desde el mismo archivo de entorno que usa systemd.
+# No se adivina /var/lib ni se ejecuta el archivo completo como shell.
+data_dir="$(python3 - "${environment_file}" <<'PY'
+import pathlib
+import sys
+
+for raw in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    if key.strip() == "CODECAFE_CV_DATA_DIR":
+        value = value.strip().strip('"').strip("'")
+        if value:
+            print(value)
+            raise SystemExit(0)
+raise SystemExit(2)
+PY
+)" || {
+    echo "DETENIDO: CODECAFE_CV_DATA_DIR no está definido en ${environment_file}." >&2
+    exit 1
+}
+
+# Conserva una copia íntegra de la base REAL de revisiones antes de reiniciar el servicio.
+database_path="${data_dir}/backups.sqlite3"
+database_backup_dir="${data_dir}/deployment-backups"
 database_backup=""
-if [[ -f "${database_path}" ]]; then
-    install -d -m 0700 -o root -g root "${database_backup_dir}"
-    database_backup="${database_backup_dir}/backups-${timestamp}.sqlite3"
-    DATABASE_SOURCE="${database_path}" DATABASE_DESTINATION="${database_backup}" python3 - <<'PY'
+if [[ ! -f "${database_path}" ]]; then
+    echo "DETENIDO: no existe la base real de CV Sync en ${database_path}." >&2
+    exit 1
+fi
+
+install -d -m 0700 -o root -g root "${database_backup_dir}"
+database_backup="${database_backup_dir}/backups-${timestamp}.sqlite3"
+DATABASE_SOURCE="${database_path}" DATABASE_DESTINATION="${database_backup}" python3 - <<'PY'
 # Importa las bibliotecas estándar necesarias para una copia SQLite consistente.
 import os
 import sqlite3
 
-# Abre la base activa y crea un archivo de respaldo independiente.
-with sqlite3.connect(os.environ["DATABASE_SOURCE"]) as source:
-    with sqlite3.connect(os.environ["DATABASE_DESTINATION"]) as destination:
-        # Usa la API de respaldo de SQLite para incluir sólo transacciones confirmadas.
+source_path = os.environ["DATABASE_SOURCE"]
+destination_path = os.environ["DATABASE_DESTINATION"]
+
+# Valida la base activa, crea la copia con la API nativa y valida la copia.
+with sqlite3.connect(source_path) as source:
+    check = source.execute("PRAGMA quick_check").fetchone()
+    if not check or check[0] != "ok":
+        raise SystemExit(f"SQLite activo no pasó quick_check: {check}")
+    latest = source.execute(
+        "SELECT revision, saved_at FROM backups ORDER BY revision DESC LIMIT 1"
+    ).fetchone()
+    with sqlite3.connect(destination_path) as destination:
         source.backup(destination)
+
+with sqlite3.connect(destination_path) as destination:
+    check = destination.execute("PRAGMA quick_check").fetchone()
+    if not check or check[0] != "ok":
+        raise SystemExit(f"SQLite respaldo no pasó quick_check: {check}")
+    copied_latest = destination.execute(
+        "SELECT revision, saved_at FROM backups ORDER BY revision DESC LIMIT 1"
+    ).fetchone()
+
+if latest != copied_latest:
+    raise SystemExit(
+        f"La copia no conserva la última revisión: activa={latest!r}, copia={copied_latest!r}"
+    )
 PY
-    chmod 0600 "${database_backup}"
-fi
+chmod 0600 "${database_backup}"
 
 server_backup="${source_dir}/server/app.py.before-update-${timestamp}"
 git -C "${source_dir}" show "${previous_commit}:server/app.py" > "${server_backup}"
@@ -157,6 +206,4 @@ systemctl is-active codecafe-cv-sync.service
 # Imprime la ruta exacta que permite regresar manualmente al HTML anterior.
 echo "CodeCafe CV Studio v${release_version} activo. Respaldo HTML: ${index_backup}"
 echo "Programa Python anterior: ${server_backup}"
-if [[ -n "${database_backup}" ]]; then
-    echo "Base de revisiones protegida: ${database_backup}"
-fi
+echo "Base de revisiones protegida: ${database_backup}"
