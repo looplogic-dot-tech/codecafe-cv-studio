@@ -70,8 +70,8 @@ function applyPrintStyle(settings: PrintSettings): void {
   }
   const protectedBreaks = settings.protectBreaks ? `
     .cvHeader,.cvJob,.cvProject,.twoCols,.toolCategory{break-inside:avoid-page;page-break-inside:avoid}
-    .cvSection h4,.jobHeading{break-after:avoid-page;page-break-after:avoid}
-    .cvSection h4 + *{break-before:avoid-page;page-break-before:avoid}
+    .editableSectionTitle,.jobHeading{break-after:avoid-page;page-break-after:avoid}
+    .editableSectionTitle + *{break-before:avoid-page;page-break-before:avoid}
     .cvJob + .cvJob{break-before:auto}
     p,li{orphans:3;widows:3}
   ` : "";
