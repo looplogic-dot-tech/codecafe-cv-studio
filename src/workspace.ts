@@ -16,7 +16,14 @@ export type CVCollection = {
   order: number;
 };
 
-export type CVProfile = { id: string; name: string; createdAt: string };
+export type ProfileBasicInfo = Pick<CV, "name" | "email" | "phone" | "location" | "linkedin">;
+export type CVProfile = {
+  id: string;
+  name: string;
+  createdAt: string;
+  // Datos base exclusivos de este perfil. Nunca se comparten con otro profileId.
+  basicInfo?: ProfileBasicInfo;
+};
 
 export type CVDocument = {
   id: string;
@@ -47,8 +54,35 @@ export const defaultCollections: CVCollection[] = [
   { id: "general", name: "General Purpose", order: 2 },
 ];
 
+const basicInfoFields: (keyof ProfileBasicInfo)[] = ["name", "email", "phone", "location", "linkedin"];
+
 export function newId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function profileDocuments(documents: CVDocument[], profileId: string): CVDocument[] {
+  return documents
+    .filter((document) => document.profileId === profileId)
+    // Los CV activos tienen prioridad; dentro de ellos se usa primero el más reciente.
+    .sort((left, right) => Number(left.archived) - Number(right.archived) || right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function deriveProfileBasicInfo(documents: CVDocument[], profileId: string): ProfileBasicInfo {
+  const candidates = profileDocuments(documents, profileId);
+  const basicInfo = { name: "", email: "", phone: "", location: "", linkedin: "" } satisfies ProfileBasicInfo;
+  for (const field of basicInfoFields) {
+    const source = candidates.find((document) => document.cv[field]?.trim());
+    if (source) basicInfo[field] = source.cv[field];
+  }
+  return basicInfo;
+}
+
+function fillMissingBasicInfo(cv: CV, basicInfo: ProfileBasicInfo): CV {
+  const next = { ...cv };
+  for (const field of basicInfoFields) {
+    if (!next[field]?.trim() && basicInfo[field]?.trim()) next[field] = basicInfo[field];
+  }
+  return next;
 }
 
 export function createInitialWorkspace(cv: CV, settings: CVSettings): CVWorkspace {
@@ -69,15 +103,51 @@ export function createInitialWorkspace(cv: CV, settings: CVSettings): CVWorkspac
     collections: defaultCollections,
     documents: [document],
     activeDocumentId: document.id,
-    profiles: [{ id: DEFAULT_PROFILE_ID, name: "Jaime", createdAt: now }],
+    profiles: [{
+      id: DEFAULT_PROFILE_ID,
+      name: "Jaime",
+      createdAt: now,
+      basicInfo: {
+        name: cv.name,
+        email: cv.email,
+        phone: cv.phone,
+        location: cv.location,
+        linkedin: cv.linkedin,
+      },
+    }],
     activeProfileId: DEFAULT_PROFILE_ID,
   };
 }
 
 export function normalizeWorkspace(workspace: CVWorkspace): CVWorkspace {
-  const profiles = workspace.profiles?.length ? workspace.profiles : [{ id: DEFAULT_PROFILE_ID, name: "Jaime", createdAt: new Date().toISOString() }];
-  const activeProfileId = profiles.some((profile) => profile.id === workspace.activeProfileId) ? workspace.activeProfileId! : profiles[0].id;
-  const documents = workspace.documents.map((document) => ({ ...document, profileId: document.profileId || profiles[0].id }));
+  const initialProfiles = workspace.profiles?.length
+    ? workspace.profiles
+    : [{ id: DEFAULT_PROFILE_ID, name: "Jaime", createdAt: new Date().toISOString() }];
+  const activeProfileId = initialProfiles.some((profile) => profile.id === workspace.activeProfileId)
+    ? workspace.activeProfileId!
+    : initialProfiles[0].id;
+
+  const assignedDocuments = workspace.documents.map((document) => ({
+    ...document,
+    profileId: document.profileId || initialProfiles[0].id,
+  }));
+
+  // Migración automática: los perfiles creados antes de basicInfo obtienen sus datos
+  // exclusivamente de CVs con el mismo profileId. En esa misma migración se rellenan
+  // campos básicos vacíos de los CVs existentes, sin sobrescribir valores ya escritos.
+  const newlyMigratedProfileIds = new Set<string>();
+  const profiles = initialProfiles.map((profile) => {
+    if (profile.basicInfo) return profile;
+    newlyMigratedProfileIds.add(profile.id);
+    return { ...profile, basicInfo: deriveProfileBasicInfo(assignedDocuments, profile.id) };
+  });
+  const basicsByProfile = new Map(profiles.map((profile) => [profile.id, profile.basicInfo!]));
+  const documents = assignedDocuments.map((document) => {
+    if (!newlyMigratedProfileIds.has(document.profileId!)) return document;
+    const basicInfo = basicsByProfile.get(document.profileId!);
+    return basicInfo ? { ...document, cv: fillMissingBasicInfo(document.cv, basicInfo) } : document;
+  });
+
   const activeDocumentId = documents.some((document) => document.id === workspace.activeDocumentId && document.profileId === activeProfileId && !document.archived)
     ? workspace.activeDocumentId
     : documents.find((document) => document.profileId === activeProfileId && !document.archived)?.id || workspace.activeDocumentId;
