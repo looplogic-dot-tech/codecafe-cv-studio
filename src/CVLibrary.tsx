@@ -24,6 +24,7 @@ type LibraryCopy = {
   limit: string;
   empty: string;
   close: string;
+  inheritBasics: string;
 };
 
 const libraryCopy: Record<"es" | "en", LibraryCopy> = {
@@ -33,6 +34,7 @@ const libraryCopy: Record<"es" | "en", LibraryCopy> = {
     create: "Crear", cancel: "Cancelar", edit: "Editar", duplicate: "Duplicar", rename: "Renombrar", move: "Mover a", archive: "Archivar", restore: "Restaurar",
     remove: "Eliminar", newCollection: "Nueva colección", collectionName: "Nombre de la colección",
     limit: "Límite actual: 20 CVs en total, incluidos los archivados", empty: "Esta colección todavía no contiene CVs.", close: "Cerrar",
+    inheritBasics: "Heredar datos básicos de este perfil",
   },
   en: {
     title: "My CVs", subtitle: "Organize each résumé by the kind of work it targets.", active: "Active", archived: "Archived",
@@ -40,6 +42,7 @@ const libraryCopy: Record<"es" | "en", LibraryCopy> = {
     create: "Create", cancel: "Cancel", edit: "Edit", duplicate: "Duplicate", rename: "Rename", move: "Move to", archive: "Archive", restore: "Restore",
     remove: "Delete", newCollection: "New collection", collectionName: "Collection name",
     limit: "Current limit: 20 total CVs, including archived CVs", empty: "This collection does not contain any CVs yet.", close: "Close",
+    inheritBasics: "Reuse this profile's basic information",
   },
 };
 
@@ -51,11 +54,13 @@ type Props = {
   draftName: string;
   draftCollection: string;
   creationMode: "blank" | "copy" | null;
+  inheritBasics: boolean;
   onSelectCollection(id: string): void;
   onShowArchived(value: boolean): void;
   onDraftName(value: string): void;
   onDraftCollection(value: string): void;
   onStartCreate(mode: "blank" | "copy"): void;
+  onInheritBasics(value: boolean): void;
   onCancelCreate(): void;
   onCreate(): void;
   onOpen(id: string): void;
@@ -90,6 +95,7 @@ export default function CVLibrary(props: Props) {
       {props.creationMode && <div className="createCvPanel">
         <label>{t.newName}<input className="inputField" value={props.draftName} onChange={(event) => props.onDraftName(event.target.value)} /></label>
         <label>{t.collection}<select className="inputField" value={props.draftCollection} onChange={(event) => props.onDraftCollection(event.target.value)}>{[...props.workspace.collections].sort((a, b) => a.order - b.order).map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></label>
+        {props.creationMode === "blank" && <label className="inheritBasics"><input type="checkbox" checked={props.inheritBasics} onChange={(event) => props.onInheritBasics(event.target.checked)} />{t.inheritBasics}</label>}
         <div><button className="primary" disabled={!props.draftName.trim()} onClick={props.onCreate}>{t.create}</button><button onClick={props.onCancelCreate}>{t.cancel}</button></div>
       </div>}
       <div className="libraryBody">

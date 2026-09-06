@@ -132,3 +132,24 @@ export function loadWorkspaceLocal(fallback: CVWorkspace): CVWorkspace {
     return fallback;
   }
 }
+
+// Combina la biblioteca de Drive con la local sin eliminar documentos de ninguno de los dos lados.
+export function mergeWorkspaces(local: CVWorkspace, remote: CVWorkspace): CVWorkspace {
+  const left = normalizeWorkspace(local);
+  const right = normalizeWorkspace(remote);
+  const documents = new Map(left.documents.map((document) => [document.id, document]));
+  for (const document of right.documents) {
+    const existing = documents.get(document.id);
+    if (!existing || document.updatedAt > existing.updatedAt) documents.set(document.id, document);
+  }
+  const profiles = new Map((left.profiles ?? []).map((profile) => [profile.id, profile]));
+  for (const profile of right.profiles ?? []) profiles.set(profile.id, profiles.get(profile.id) ?? profile);
+  const collections = new Map(left.collections.map((collection) => [collection.id, collection]));
+  for (const collection of right.collections) collections.set(collection.id, collections.get(collection.id) ?? collection);
+  return normalizeWorkspace({
+    ...left,
+    collections: [...collections.values()],
+    profiles: [...profiles.values()],
+    documents: [...documents.values()],
+  });
+}

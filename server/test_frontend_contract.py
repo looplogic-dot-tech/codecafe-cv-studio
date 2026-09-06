@@ -129,6 +129,18 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("restoreServerSession()", app)
         self.assertIn('api<ServerSession>("/api/session")', cloud)
 
+    def test_drive_library_and_profile_scoped_inheritance(self):
+        app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+        workspace = (ROOT / "src" / "workspace.ts").read_text(encoding="utf-8")
+        library = (ROOT / "src" / "CVLibrary.tsx").read_text(encoding="utf-8")
+        self.assertIn("mergeWorkspaces(preserved, backup.workspace)", app)
+        self.assertIn("export function mergeWorkspaces", workspace)
+        self.assertIn("inheritBasics ?", app)
+        self.assertIn("current.cv.name", app)
+        self.assertIn("Heredar datos básicos de este perfil", library)
+        self.assertIn("contacto@codecafe.io", app)
+        self.assertIn("Sincronizar ahora", app)
+
 
 if __name__ == "__main__":
     unittest.main()
