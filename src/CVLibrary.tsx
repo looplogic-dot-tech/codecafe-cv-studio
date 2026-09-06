@@ -1,6 +1,7 @@
 import { useState } from "react";
 import CVLibraryComposer from "./CVLibraryComposer";
 import ProfessionalLibrary from "./ProfessionalLibrary";
+import { applyProfileBasicsToNewBlankCvFromStorage } from "./profileBasics";
 import type { CVWorkspace } from "./workspace";
 import { MAX_ACTIVE_CVS } from "./workspace";
 
@@ -94,6 +95,16 @@ export default function CVLibrary(props: Props) {
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   const composeDocument = composeDocumentId ? props.workspace.documents.find((document) => document.id === composeDocumentId) : undefined;
 
+  const createDocument = () => {
+    const modeAtCreation = props.creationMode;
+    props.onCreate();
+    if (modeAtCreation !== "blank") return;
+    window.setTimeout(() => {
+      const updated = applyProfileBasicsToNewBlankCvFromStorage();
+      if (updated) window.dispatchEvent(new CustomEvent("codecafe-workspace-reload", { detail: { documentId: updated.activeDocumentId, reason: "new-cv-profile-basics" } }));
+    }, 0);
+  };
+
   return <div className="libraryOverlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) props.onClose(); }}>
     <section className="libraryPanel" role="dialog" aria-modal="true" aria-labelledby="library-title">
       <div className="libraryHead"><div><span className="eyebrow">CODECAFE LIBRARY</span><h2 id="library-title">{t.title}</h2><p>{t.subtitle}</p></div><button onClick={props.onClose} aria-label={t.close}>×</button></div>
@@ -111,7 +122,7 @@ export default function CVLibrary(props: Props) {
           {props.creationMode && <div className="createCvPanel">
             <label>{t.newName}<input className="inputField" value={props.draftName} onChange={(event) => props.onDraftName(event.target.value)} /></label>
             <label>{t.collection}<select className="inputField" value={props.draftCollection} onChange={(event) => props.onDraftCollection(event.target.value)}>{[...props.workspace.collections].sort((a, b) => a.order - b.order).map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></label>
-            <div><button className="primary" disabled={!props.draftName.trim()} onClick={props.onCreate}>{t.create}</button><button onClick={props.onCancelCreate}>{t.cancel}</button></div>
+            <div><button className="primary" disabled={!props.draftName.trim()} onClick={createDocument}>{t.create}</button><button onClick={props.onCancelCreate}>{t.cancel}</button></div>
           </div>}
           <div className="libraryBody">
             <nav className="collectionNav">
