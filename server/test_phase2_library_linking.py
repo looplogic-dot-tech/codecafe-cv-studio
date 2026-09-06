@@ -24,7 +24,8 @@ class Phase2LibraryLinkingTests(unittest.TestCase):
         self.assertIn('deriveProfileBasicInfo', workspace)
         self.assertIn('fillMissingBasicInfo', workspace)
         self.assertIn('if (!next[field]?.trim() && basicInfo[field]?.trim())', workspace)
-        self.assertIn('same profileId', workspace)
+        self.assertIn('deriveProfileBasicInfo(assignedDocuments, profile.id)', workspace)
+        self.assertIn('document.profileId === profileId', workspace)
 
     def test_profile_basics_are_editable_from_professional_library(self):
         library = (ROOT / "src" / "ProfessionalLibrary.tsx").read_text(encoding="utf-8")
@@ -62,7 +63,8 @@ class Phase2LibraryLinkingTests(unittest.TestCase):
         self.assertIn('Suggested', composer)
         self.assertIn('placementsForKind', composer)
         self.assertIn('Apply to CV', composer)
-        self.assertIn('profile basic information', composer)
+        self.assertIn('Profile basic information is not touched here.', composer)
+        self.assertIn('composerBasicGuard', composer)
 
     def test_custom_record_fields_can_be_renamed_hidden_and_added(self):
         library = (ROOT / "src" / "ProfessionalLibrary.tsx").read_text(encoding="utf-8")
