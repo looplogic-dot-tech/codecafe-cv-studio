@@ -1,5 +1,15 @@
 # Historial de versiones
 
+## 1.4.0 — 2026-09-06
+
+- Presenta `Herramientas y tecnologías` por categorías compactas cuando cada línea usa `Categoría: contenido`.
+- Conserva sin modificación el texto plano de los CVs creados con versiones anteriores.
+- Permite editar directamente en la vista previa los títulos visibles de nueve secciones.
+- Mantiene identificadores internos estables y guarda los títulos personalizados dentro de cada CV.
+- Permite restablecer cada título a su valor predeterminado ES/EN con un solo clic.
+- Aplica categorías y títulos personalizados a pantalla, impresión, PDF, copia portátil de Drive y exportación ATS.
+- Conserva el flujo actual de edición, guardado, biblioteca, sincronización y diseño responsive.
+
 ## 1.3.0 — 2026-08-31
 
 - Conserva íntegro el editor, la interfaz móvil y la biblioteca de CVs de v1.2.0.

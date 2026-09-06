@@ -15,7 +15,7 @@ if [[ "${EUID}" -ne 0 ]]; then
     exit 1
 fi
 
-# Confirma que la compilación v1.3.0 y el sitio funcional existen antes de copiar nada.
+# Confirma que la compilación compatible y el sitio funcional existen antes de copiar nada.
 for required in \
     "${source_dir}/dist/index.html" \
     "${source_dir}/dist/assets" \
@@ -29,12 +29,16 @@ for required in \
 done
 
 # Comprueba que el repositorio seleccionado declara exactamente la versión esperada.
-python3 -c 'import json; assert json.load(open("/opt/codecafe-studio/apps/codecafe-cv-studio-source/package.json"))["version"] == "1.3.0"'
+release_version="$(python3 -c 'import json; print(json.load(open("/opt/codecafe-studio/apps/codecafe-cv-studio-source/package.json"))["version"])')"
+case "${release_version}" in
+  1.3.0|1.4.0) ;;
+  *) echo "DETENIDO: versión incompatible: ${release_version}"; exit 1 ;;
+esac
 
 # Recupera desde Git el programa Python de la versión funcional v1.1.0.
 # Se conserva fuera del nombre activo para poder restaurarlo si el reinicio falla.
 timestamp="$(date -u +%Y%m%d-%H%M%S)"
-server_backup="${source_dir}/server/app.py.before-v1.3.0-${timestamp}"
+server_backup="${source_dir}/server/app.py.before-update-${timestamp}"
 git -C "${source_dir}" show "${previous_commit}:server/app.py" > "${server_backup}"
 chmod 0644 "${server_backup}"
 
@@ -60,7 +64,7 @@ if [[ "${health_response}" != *'"service":"CodeCafe CV Sync"'* ]]; then
 fi
 
 # Crea un respaldo recuperable del HTML que actualmente mantiene el sitio funcionando.
-index_backup="${web_root}/index.html.before-v1.3.0-${timestamp}"
+index_backup="${web_root}/index.html.before-update-${timestamp}"
 cp --archive "${web_root}/index.html" "${index_backup}"
 
 # Copia los nuevos archivos con nombres únicos sin borrar assets de versiones anteriores.
@@ -70,7 +74,7 @@ for asset in "${source_dir}"/dist/assets/*; do
 done
 
 # Prepara el HTML nuevo con un nombre temporal dentro del mismo sistema de archivos.
-index_temporary="$(mktemp --tmpdir="${web_root}" .index-v1.3.0.XXXXXX)"
+index_temporary="$(mktemp --tmpdir="${web_root}" .index-update.XXXXXX)"
 install -m 0644 -o root -g root "${source_dir}/dist/index.html" "${index_temporary}"
 
 # Activa el HTML mediante un cambio atómico; una petición nunca verá un archivo incompleto.
@@ -129,5 +133,5 @@ systemctl is-active nginx
 systemctl is-active codecafe-cv-sync.service
 
 # Imprime la ruta exacta que permite regresar manualmente al HTML anterior.
-echo "CodeCafe CV Studio v1.3.0 activo. Respaldo HTML: ${index_backup}"
+echo "CodeCafe CV Studio v${release_version} activo. Respaldo HTML: ${index_backup}"
 echo "Programa Python anterior: ${server_backup}"

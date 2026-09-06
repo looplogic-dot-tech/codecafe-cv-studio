@@ -36,6 +36,35 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("spellCheck={true}", app)
         self.assertIn("customSections", app)
 
+    def test_tools_support_categories_without_migrating_legacy_text(self):
+        app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+        styles = (ROOT / "src" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("export function parseToolLines", app)
+        self.assertIn('const separator = line.indexOf(":")', app)
+        self.assertIn('category: "", content: line', app)
+        self.assertIn('className="toolCategory"', app)
+        self.assertIn(".toolCategory b", styles)
+        self.assertGreaterEqual(app.count(": AWS · Azure · Docker"), 1)
+
+    def test_section_ids_are_stable_and_custom_titles_are_optional(self):
+        app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+        for section_id in ("profile", "experience", "core_skills", "tools", "projects",
+                           "certifications", "skills", "education", "languages"):
+            self.assertIn(f'"{section_id}"', app)
+        self.assertIn("sectionTitles?: SectionTitles", app)
+        self.assertIn("delete sectionTitles[id]", app)
+        self.assertIn('onTitleChange={(value) => setSectionTitle("core_skills", value)}', app)
+        self.assertIn('onTitleChange={(value) => setSectionTitle("projects", value)}', app)
+
+    def test_print_output_uses_categories_and_custom_titles(self):
+        app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+        styles = (ROOT / "src" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("printableTools(cv.tools)", app)
+        self.assertIn('title("core_skills", labels.coreHeading)', app)
+        self.assertIn('title("projects", labels.projectsHeading)', app)
+        self.assertIn("@media print", styles)
+        self.assertIn(".editableSectionTitle button{display:none!important}", styles)
+
 
 if __name__ == "__main__":
     unittest.main()
