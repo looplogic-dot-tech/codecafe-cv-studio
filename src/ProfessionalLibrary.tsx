@@ -10,6 +10,7 @@ import {
   type ProfessionalRecord,
   type ProfessionalRecordKind,
   type ProfessionalRecordStatus,
+  type ProfileBasicInfo,
 } from "./workspace";
 
 type Props = {
@@ -36,6 +37,8 @@ const emptyDraft = (): Draft => ({
   details: {},
 });
 
+const emptyBasics = (): ProfileBasicInfo => ({ name: "", email: "", phone: "", location: "", linkedin: "" });
+
 const detailFields: Partial<Record<ProfessionalRecordKind, string[]>> = {
   experience: ["role", "company", "dates"],
   project: ["stack", "repository"],
@@ -54,7 +57,9 @@ const copy = {
     title: "Biblioteca Profesional",
     intro: "Información profesional reutilizable para este perfil. Los CVs actuales no se modifican hasta que los vincules.",
     contact: "Información de contacto del perfil",
-    contactNote: "Estos datos siguen siendo exclusivos del perfil y permanecen editables en cada CV.",
+    contactNote: "Estos son los datos canónicos que heredarán automáticamente los nuevos CVs en blanco de este perfil. Los CVs existentes siguen siendo editables e independientes.",
+    editContact: "Editar datos personales",
+    saveContact: "Guardar datos personales",
     search: "Buscar experiencia, habilidad, proyecto, etiqueta…",
     add: "＋ Añadir registro",
     allKinds: "Todos los tipos",
@@ -94,12 +99,19 @@ const copy = {
     hiddenFields: "Campos ocultos",
     restoreField: "Restaurar",
     renameHint: "El título del campo es editable. Quitar un campo no afecta los datos básicos del perfil.",
+    name: "Nombre",
+    email: "Correo",
+    phone: "Teléfono",
+    location: "Ubicación",
+    linkedin: "LinkedIn / Portafolio",
   },
   en: {
     title: "Professional Library",
     intro: "Reusable professional information for this profile. Existing CVs are not modified until you link records.",
     contact: "Profile contact information",
-    contactNote: "These values remain exclusive to this profile and stay editable inside each CV.",
+    contactNote: "These are the canonical values automatically inherited by new blank CVs in this profile. Existing CVs remain editable and independent.",
+    editContact: "Edit personal information",
+    saveContact: "Save personal information",
     search: "Search experience, skill, project, tag…",
     add: "＋ Add record",
     allKinds: "All types",
@@ -139,6 +151,11 @@ const copy = {
     hiddenFields: "Hidden fields",
     restoreField: "Restore",
     renameHint: "Field titles are editable. Removing a field never affects profile basic information.",
+    name: "Name",
+    email: "Email",
+    phone: "Phone",
+    location: "Location",
+    linkedin: "LinkedIn / Portfolio",
   },
 } as const;
 
@@ -205,6 +222,7 @@ export default function ProfessionalLibrary({ lang, workspace }: Props) {
   const [kind, setKind] = useState<"all" | ProfessionalRecordKind>("all");
   const [status, setStatus] = useState<"active" | ProfessionalRecordStatus | "all">("active");
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [basicDraft, setBasicDraft] = useState<ProfileBasicInfo | null>(null);
 
   useEffect(() => {
     setWorking(loadWorkspaceLocal(workspace));
@@ -236,6 +254,23 @@ export default function ProfessionalLibrary({ lang, workspace }: Props) {
     const updated = replaceProfessionalLibrary(latest, { version: 1, profileId, records });
     saveWorkspaceLocal(updated);
     setWorking(updated);
+  };
+
+  const startBasicEdit = () => setBasicDraft({ ...(profile?.basicInfo || emptyBasics()) });
+
+  const saveBasicInfo = () => {
+    if (!basicDraft) return;
+    const latest = loadWorkspaceLocal(working);
+    const profiles = (latest.profiles ?? []).map((candidate) => candidate.id === profileId
+      ? { ...candidate, basicInfo: { ...basicDraft } }
+      : candidate);
+    const updated = { ...latest, profiles };
+    saveWorkspaceLocal(updated);
+    setWorking(updated);
+    setBasicDraft(null);
+    // Remonta App desde la copia local para que un snapshot antiguo no pueda
+    // sobrescribir después los nuevos defaults del perfil.
+    window.dispatchEvent(new CustomEvent("codecafe-workspace-reload", { detail: { reason: "profile-basic-info" } }));
   };
 
   const startEdit = (record: ProfessionalRecord) => setDraft({
@@ -325,6 +360,7 @@ export default function ProfessionalLibrary({ lang, workspace }: Props) {
   const basic = profile?.basicInfo;
   const visibleKeys = draft ? visibleDetailKeys(draft.kind, draft.details) : [];
   const hiddenKeys = draft ? hiddenDefaultKeys(draft.kind, draft.details) : [];
+  const basicFields: (keyof ProfileBasicInfo)[] = ["name", "email", "phone", "location", "linkedin"];
 
   return <div className="professionalLibrary">
     <div className="professionalIntro">
@@ -333,14 +369,17 @@ export default function ProfessionalLibrary({ lang, workspace }: Props) {
     </div>
 
     <section className="professionalContact">
-      <div><b>{t.contact}</b><span>{t.contactNote}</span></div>
-      <dl>
-        <div><dt>{lang === "es" ? "Nombre" : "Name"}</dt><dd>{basic?.name || "—"}</dd></div>
-        <div><dt>Email</dt><dd>{basic?.email || "—"}</dd></div>
-        <div><dt>{lang === "es" ? "Teléfono" : "Phone"}</dt><dd>{basic?.phone || "—"}</dd></div>
-        <div><dt>{lang === "es" ? "Ubicación" : "Location"}</dt><dd>{basic?.location || "—"}</dd></div>
-        <div><dt>LinkedIn</dt><dd>{basic?.linkedin || "—"}</dd></div>
-      </dl>
+      <div className="professionalContactHead"><div><b>{t.contact}</b><span>{t.contactNote}</span></div>{!basicDraft && <button onClick={startBasicEdit}>{t.editContact}</button>}</div>
+      {basicDraft ? <div className="professionalBasicEditor">
+        {basicFields.map((key) => <label key={key}>{t[key]}<input value={basicDraft[key]} onChange={(event) => setBasicDraft({ ...basicDraft, [key]: event.target.value })} /></label>)}
+        <div className="professionalBasicActions"><button className="primary" onClick={saveBasicInfo}>{t.saveContact}</button><button onClick={() => setBasicDraft(null)}>{t.cancel}</button></div>
+      </div> : <dl>
+        <div><dt>{t.name}</dt><dd>{basic?.name || "—"}</dd></div>
+        <div><dt>{t.email}</dt><dd>{basic?.email || "—"}</dd></div>
+        <div><dt>{t.phone}</dt><dd>{basic?.phone || "—"}</dd></div>
+        <div><dt>{t.location}</dt><dd>{basic?.location || "—"}</dd></div>
+        <div><dt>{t.linkedin}</dt><dd>{basic?.linkedin || "—"}</dd></div>
+      </dl>}
     </section>
 
     {draft && <section className="professionalEditor">
