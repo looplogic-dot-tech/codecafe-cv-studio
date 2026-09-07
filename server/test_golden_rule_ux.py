@@ -26,6 +26,13 @@ class GoldenRuleUxTests(unittest.TestCase):
         self.assertIn("window.confirm", library)
         self.assertIn('reason: "cv-removed"', library)
 
+    def test_removing_cv_reopens_my_cvs_after_workspace_reload(self):
+        main = (ROOT / "src" / "main.tsx").read_text(encoding="utf-8")
+        self.assertIn("reopenMyCvsAfterRender", main)
+        self.assertIn('detail?.reason === "cv-removed"', main)
+        self.assertIn("requestAnimationFrame", main)
+        self.assertIn('/My CVs|Mis CVs/i', main)
+
     def test_suggestions_can_be_applied_in_one_click(self):
         composer = (ROOT / "src" / "CVLibraryComposer.tsx").read_text(encoding="utf-8")
         self.assertIn("Apply suggested", composer)
