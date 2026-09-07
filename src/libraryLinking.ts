@@ -78,7 +78,7 @@ function joinContent(content: string, extra: string[]): string {
 }
 
 export function defaultPlacement(kind: ProfessionalRecordKind): LibraryPlacement {
-  return {
+  const placements: Record<ProfessionalRecordKind, LibraryPlacement> = {
     summary: "summary",
     experience: "experience",
     skill: "coreSkills",
@@ -88,7 +88,8 @@ export function defaultPlacement(kind: ProfessionalRecordKind): LibraryPlacement
     certification: "certifications",
     language: "languages",
     custom: "custom",
-  }[kind];
+  };
+  return placements[kind];
 }
 
 export function placementsForKind(kind: ProfessionalRecordKind): LibraryPlacement[] {
