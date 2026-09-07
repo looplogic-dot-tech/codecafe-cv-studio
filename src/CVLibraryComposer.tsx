@@ -27,7 +27,8 @@ const copy = {
     customized: "Personalizado en este CV",
     placement: "Sección del CV",
     none: "No hay registros revisados disponibles.",
-    save: "Aplicar al CV",
+    save: "Aplicar selección",
+    applySuggested: "Aplicar sugerencias",
     cancel: "Cancelar",
     selected: "seleccionados",
     basics: "Nombre, email, teléfono, ubicación y LinkedIn continúan heredándose exclusivamente desde el perfil.",
@@ -41,7 +42,8 @@ const copy = {
     customized: "Customized in this CV",
     placement: "CV section",
     none: "No reviewed library records are available.",
-    save: "Apply to CV",
+    save: "Apply selection",
+    applySuggested: "Apply suggested",
     cancel: "Cancel",
     selected: "selected",
     basics: "Name, email, phone, location and LinkedIn continue to inherit exclusively from the profile.",
@@ -88,18 +90,26 @@ export default function CVLibraryComposer({ lang, workspace, document, onClose }
   const [selected, setSelected] = useState(initial);
   const [query, setQuery] = useState("");
 
+  const scoredRecords = useMemo(() => library.records
+    .filter((record) => record.status === "reviewed")
+    .map((record) => ({ record, score: suggestionScore(record, document, collection?.name || "") })),
+  [collection?.name, document, library.records]);
+
+  const suggestedRecords = useMemo(() => scoredRecords
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => right.score - left.score || right.record.updatedAt.localeCompare(left.record.updatedAt)),
+  [scoredRecords]);
+
   const records = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
-    return library.records
-      .filter((record) => record.status === "reviewed")
-      .filter((record) => !needle || [record.title, record.content, ...record.tags, ...Object.values(record.details)].join(" ").toLocaleLowerCase().includes(needle))
-      .map((record) => ({ record, score: suggestionScore(record, document, collection?.name || "") }))
+    return scoredRecords
+      .filter(({ record }) => !needle || [record.title, record.content, ...record.tags, ...Object.values(record.details)].join(" ").toLocaleLowerCase().includes(needle))
       .sort((left, right) => {
         const leftSelected = selected.has(left.record.id) ? 1 : 0;
         const rightSelected = selected.has(right.record.id) ? 1 : 0;
         return rightSelected - leftSelected || right.score - left.score || right.record.updatedAt.localeCompare(left.record.updatedAt);
       });
-  }, [collection?.name, document, library.records, query, selected]);
+  }, [query, scoredRecords, selected]);
 
   const toggle = (recordId: string, checked: boolean) => {
     const record = library.records.find((candidate) => candidate.id === recordId);
@@ -132,12 +142,28 @@ export default function CVLibraryComposer({ lang, workspace, document, onClose }
     });
   };
 
-  const apply = () => {
-    const ordered = [...selected.values()].sort((a, b) => a.order - b.order).map((item, order) => ({ ...item, order }));
+  const persistSelections = (selections: LibrarySelection[]) => {
+    const ordered = [...selections].sort((a, b) => a.order - b.order).map((item, order) => ({ ...item, order }));
     const updated = persistLibrarySelection(document.id, ordered);
     if (!updated) return;
     window.dispatchEvent(new CustomEvent("codecafe-workspace-reload", { detail: { documentId: document.id } }));
     onClose();
+  };
+
+  const apply = () => persistSelections([...selected.values()]);
+
+  const applySuggested = () => {
+    const next = new Map(selected);
+    for (const { record } of suggestedRecords) {
+      if (!next.has(record.id)) {
+        next.set(record.id, {
+          recordId: record.id,
+          placement: defaultPlacement(record.kind),
+          order: next.size,
+        });
+      }
+    }
+    persistSelections([...next.values()]);
   };
 
   return <section className="composerPanel">
@@ -172,6 +198,10 @@ export default function CVLibraryComposer({ lang, workspace, document, onClose }
         </article>;
       })}
     </div>
-    <footer className="composerFooter"><button className="primary" onClick={apply}>{t.save}</button><button onClick={onClose}>{t.cancel}</button></footer>
+    <footer className="composerFooter">
+      {suggestedRecords.length > 0 && <button className="primary" onClick={applySuggested}>✦ {t.applySuggested} ({suggestedRecords.length})</button>}
+      <button className={suggestedRecords.length > 0 ? "" : "primary"} onClick={apply}>{t.save}</button>
+      <button onClick={onClose}>{t.cancel}</button>
+    </footer>
   </section>;
 }
