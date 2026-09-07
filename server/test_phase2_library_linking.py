@@ -41,8 +41,15 @@ class Phase2LibraryLinkingTests(unittest.TestCase):
         self.assertIn('applyProfileBasicsToNewBlankCvFromStorage', helper)
         for field in ("name", "email", "phone", "location", "linkedin"):
             self.assertIn(f'{field}: basic.{field}', helper)
-        self.assertIn('modeAtCreation !== "blank"', library)
-        self.assertIn('applyProfileBasicsToNewBlankCvFromStorage()', library)
+        # Golden-rule flow creates a blank CV inside My CVs so it can open
+        # suggestions immediately. It must still source canonical basics from
+        # the active profile, while copy mode continues through onCreate().
+        self.assertIn('if (props.creationMode === "blank")', library)
+        self.assertIn('createBlankAndCompose()', library)
+        self.assertIn('profile?.basicInfo', library)
+        for field in ("name", "email", "phone", "location", "linkedin"):
+            self.assertIn(f'{field}: basics?.{field} || current.cv.{field}', library)
+        self.assertIn('props.onCreate();', library)
 
     def test_phase2_does_not_change_workspace_schema(self):
         workspace = (ROOT / "src" / "workspace.ts").read_text(encoding="utf-8")
@@ -62,7 +69,8 @@ class Phase2LibraryLinkingTests(unittest.TestCase):
         self.assertIn('suggestionScore', composer)
         self.assertIn('Suggested', composer)
         self.assertIn('placementsForKind', composer)
-        self.assertIn('Apply to CV', composer)
+        self.assertIn('Apply selection', composer)
+        self.assertIn('Apply suggested', composer)
         self.assertIn('Profile basic information is not touched here.', composer)
         self.assertIn('composerBasicGuard', composer)
 
