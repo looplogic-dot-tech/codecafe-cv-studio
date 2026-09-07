@@ -21,11 +21,18 @@ function validClientId(value: string): boolean {
 function copy() {
   return language() === "es"
     ? {
-        title: "Acceso de Google Drive",
-        body: "Cada cliente configura y autoriza Google Drive desde su propio proyecto de Google Cloud. CodeCafe no necesita la contraseña ni el Client Secret de Google.",
-        guide: "Configurar Google Drive paso a paso",
-        guideTitle: "Configurar tu propio acceso a Google Drive",
-        intro: "Esta configuración se realiza una sola vez por navegador. Usa tu propia cuenta y tu propio proyecto de Google Cloud. CV Studio sólo necesita el OAuth Client ID público.",
+        title: "Guardado y Google Drive",
+        body: "CV Studio guarda tus cambios localmente de forma automática. Google Drive es opcional y requiere configuración adicional en la cuenta del cliente.",
+        guide: "Opciones de guardado",
+        guideTitle: "¿Cómo quieres guardar tus CVs?",
+        intro: "La opción simple no requiere configurar Google. Activa Google Drive sólo si necesitas sincronización en la nube o trabajar desde varios dispositivos.",
+        localTitle: "Opción simple — guardar localmente",
+        localBody: "No requiere configuración. CV Studio sigue guardando automáticamente en este navegador. Para conservar además un archivo en el disco de tu computadora, descarga un respaldo cuando quieras.",
+        localContinue: "Seguir usando guardado local",
+        localDownload: "Descargar respaldo a esta computadora",
+        driveTitle: "Opción avanzada — Google Drive",
+        driveBody: "Úsala si quieres sincronizar tus CVs mediante tu propia cuenta de Google Drive. La configuración se hace en tu propio Google Cloud Console.",
+        advancedSummary: "Configurar Google Drive paso a paso",
         steps: [
           "Abre Google Cloud Console con la cuenta de Google que usarás para Drive y crea un proyecto nuevo o selecciona uno propio.",
           "Ve a APIs y servicios > Biblioteca, busca Google Drive API y pulsa Habilitar.",
@@ -37,9 +44,9 @@ function copy() {
           "Crea el cliente y copia el Client ID que termina en .apps.googleusercontent.com. No copies ni pegues el Client Secret.",
           "Pega ese Client ID en el campo inferior y pulsa Guardar y conectar. Después elige la misma cuenta de Google y autoriza el acceso.",
         ],
-        testing: "Si tu proyecto permanece en modo Testing, la cuenta que usarás debe estar incluida por ti mismo en Test users. No necesitas pedir a CodeCafe que autorice tu dirección de correo.",
+        testing: "Si tu proyecto permanece en modo Testing, añade tú mismo la cuenta que usarás en Test users. No necesitas pedir a CodeCafe que autorice tu correo.",
         clientIdLabel: "Tu OAuth Client ID",
-        clientIdHint: "Termina en .apps.googleusercontent.com · se guarda sólo en este navegador.",
+        clientIdHint: "Termina en .apps.googleusercontent.com · se guarda sólo en este navegador. Nunca pegues el Client Secret.",
         connect: "Guardar y conectar Google Drive",
         invalid: "El Client ID no parece válido. Copia el OAuth Client ID de tipo Web application; no uses el Client Secret.",
         connecting: "Conectando con Google…",
@@ -50,11 +57,18 @@ function copy() {
         close: "Cerrar",
       }
     : {
-        title: "Google Drive access",
-        body: "Each client configures and authorizes Google Drive from their own Google Cloud project. CodeCafe never needs the Google password or Client Secret.",
-        guide: "Set up Google Drive step by step",
-        guideTitle: "Configure your own Google Drive access",
-        intro: "This is a one-time setup per browser. Use your own Google account and your own Google Cloud project. CV Studio only needs the public OAuth Client ID.",
+        title: "Saving and Google Drive",
+        body: "CV Studio saves your changes locally automatically. Google Drive is optional and requires additional setup in the client's own account.",
+        guide: "Storage options",
+        guideTitle: "How do you want to save your CVs?",
+        intro: "The simple option requires no Google configuration. Enable Google Drive only if you need cloud sync or want to work across multiple devices.",
+        localTitle: "Simple option — save locally",
+        localBody: "No setup is required. CV Studio continues autosaving in this browser. To also keep a file on your computer's disk, download a backup whenever you want.",
+        localContinue: "Keep using local storage",
+        localDownload: "Download backup to this computer",
+        driveTitle: "Advanced option — Google Drive",
+        driveBody: "Use this if you want to synchronize CVs through your own Google Drive account. Setup is performed in your own Google Cloud Console.",
+        advancedSummary: "Set up Google Drive step by step",
         steps: [
           "Open Google Cloud Console with the Google account you will use for Drive and create a new project or select one you own.",
           "Go to APIs & Services > Library, find Google Drive API, and click Enable.",
@@ -66,9 +80,9 @@ function copy() {
           "Create the client and copy the Client ID ending in .apps.googleusercontent.com. Do not copy or paste the Client Secret.",
           "Paste that Client ID below and click Save and connect. Then choose the same Google account and authorize access.",
         ],
-        testing: "If your project remains in Testing, you must add the account you will use under Test users yourself. You do not need CodeCafe to approve your email address.",
+        testing: "If your project remains in Testing, add the account you will use under Test users yourself. You do not need CodeCafe to approve your email address.",
         clientIdLabel: "Your OAuth Client ID",
-        clientIdHint: "Ends in .apps.googleusercontent.com · stored only in this browser.",
+        clientIdHint: "Ends in .apps.googleusercontent.com · stored only in this browser. Never paste the Client Secret.",
         connect: "Save and connect Google Drive",
         invalid: "The Client ID does not look valid. Copy the Web application OAuth Client ID; do not use the Client Secret.",
         connecting: "Connecting to Google…",
@@ -82,6 +96,12 @@ function copy() {
 
 function closeGuide(): void {
   document.getElementById(GUIDE_ID)?.remove();
+}
+
+function downloadLocalBackup(): void {
+  const exportButton = document.querySelector<HTMLButtonElement>(".cloudPortable > button");
+  closeGuide();
+  exportButton?.click();
 }
 
 async function authorizeWithClientId(clientId: string, status?: HTMLElement): Promise<void> {
@@ -120,7 +140,7 @@ function openGuide(): void {
   const heading = document.createElement("div");
   const eyebrow = document.createElement("span");
   eyebrow.className = "eyebrow";
-  eyebrow.textContent = "GOOGLE DRIVE";
+  eyebrow.textContent = "CODECAFE STORAGE";
   const h2 = document.createElement("h2");
   h2.textContent = text.guideTitle;
   heading.append(eyebrow, h2);
@@ -133,6 +153,40 @@ function openGuide(): void {
   const intro = document.createElement("p");
   intro.className = "driveGuideIntro";
   intro.textContent = text.intro;
+
+  const choices = document.createElement("div");
+  choices.className = "storageChoices";
+
+  const localCard = document.createElement("section");
+  localCard.className = "storageChoice localChoice";
+  const localHeading = document.createElement("h3");
+  localHeading.textContent = text.localTitle;
+  const localBody = document.createElement("p");
+  localBody.textContent = text.localBody;
+  const localActions = document.createElement("div");
+  localActions.className = "storageChoiceActions";
+  const localContinue = document.createElement("button");
+  localContinue.className = "primary";
+  localContinue.textContent = text.localContinue;
+  localContinue.addEventListener("click", closeGuide);
+  const localDownload = document.createElement("button");
+  localDownload.textContent = text.localDownload;
+  localDownload.addEventListener("click", downloadLocalBackup);
+  localActions.append(localContinue, localDownload);
+  localCard.append(localHeading, localBody, localActions);
+
+  const driveCard = document.createElement("section");
+  driveCard.className = "storageChoice driveChoice";
+  const driveHeading = document.createElement("h3");
+  driveHeading.textContent = text.driveTitle;
+  const driveBody = document.createElement("p");
+  driveBody.textContent = text.driveBody;
+
+  const advanced = document.createElement("details");
+  advanced.className = "driveAdvancedSetup";
+  advanced.open = Boolean(storedClientId());
+  const summary = document.createElement("summary");
+  summary.textContent = text.advancedSummary;
 
   const steps = document.createElement("ol");
   steps.className = "driveGuideSteps";
@@ -187,12 +241,16 @@ function openGuide(): void {
   scopeHelp.textContent = text.scopeHelp;
   links.append(consoleLink, oauthHelp, scopeHelp);
 
+  advanced.append(summary, steps, testing, clientBox, links);
+  driveCard.append(driveHeading, driveBody, advanced);
+  choices.append(localCard, driveCard);
+
   const close = document.createElement("button");
   close.className = "driveGuideClose";
   close.textContent = text.close;
   close.addEventListener("click", closeGuide);
 
-  dialog.append(head, intro, steps, testing, clientBox, links, close);
+  dialog.append(head, intro, choices, close);
   overlay.append(dialog);
   overlay.addEventListener("mousedown", (event) => { if (event.target === overlay) closeGuide(); });
   document.body.append(overlay);
