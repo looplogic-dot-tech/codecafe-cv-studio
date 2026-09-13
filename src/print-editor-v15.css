@@ -1,0 +1,60 @@
+/* CodeCafe CV Studio 1.5: enlarge the actual paper preview without changing the proven 1.4.9 runtime logic. */
+@media (min-width: 1300px) {
+  .printEditorPreviewFrame {
+    zoom: 1.35;
+  }
+
+  .printEditorDialogV2 {
+    width: min(1560px, 99vw);
+    height: min(980px, 97vh);
+    grid-template-columns: minmax(0, 1fr) 285px;
+  }
+
+  .printEditorPreviewColumnV2 {
+    padding: 10px 14px;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1299px) {
+  .printEditorPreviewFrame {
+    zoom: 1.18;
+  }
+
+  .printEditorDialogV2 {
+    width: 98vw;
+    height: 96vh;
+    grid-template-columns: minmax(0, 1fr) 285px;
+  }
+}
+
+/* Keep the control column compact so most of the window belongs to the CV. */
+@media (min-width: 901px) {
+  .printEditorControls {
+    font-size: .72rem;
+  }
+
+  .printEditorHeadV2 h2 {
+    font-size: 1.18rem;
+  }
+
+  .printEditorHeadV2 p,
+  .printEditorHintV2,
+  .printEditorCheckRowV2 {
+    font-size: .66rem;
+  }
+
+  .printEditorPresetRowV2 button,
+  .printEditorActionsV2 button,
+  .printEditorBreakModeV2,
+  .printEditorTextButtonV2,
+  .printEditorCompactRowV2 select,
+  .printEditorNumberField {
+    font-size: .68rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .printEditorPreviewFrame {
+    zoom: 1;
+  }
+}
