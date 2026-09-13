@@ -31,11 +31,9 @@ import {
   createInitialWorkspace,
   CVDocument,
   CVWorkspace,
-  loadWorkspaceLocal,
   MAX_ACTIVE_CVS,
   newId,
   isWorkspace,
-  mergeWorkspaces,
   replaceCurrentDocument,
   saveWorkspaceLocal,
 } from "./workspace";
@@ -307,38 +305,18 @@ export default function Home() {
   const t = copy[lang];
 
   useEffect(() => {
-    const stored = localStorage.getItem("codecafe-cv");
-    const settings = localStorage.getItem("codecafe-cv-settings");
-    let migratedCV = seed;
-    let migratedLang: Lang = "es";
-    let migratedTemplate: "ats" | "modern" = "ats";
-    let migratedPhotoOn = false;
-    if (stored) {
-      try {
-        const old = JSON.parse(stored);
-        migratedCV = { ...seed, ...old, projects: old.projects ?? seed.projects };
-      } catch {}
-    }
-    if (settings) {
-      try {
-        const s = JSON.parse(settings);
-        if (s.lang === "es" || s.lang === "en") migratedLang = s.lang;
-        if (s.template === "ats" || s.template === "modern") migratedTemplate = s.template;
-        migratedPhotoOn = Boolean(s.photoOn);
-      } catch {}
-    }
-    const loadedWorkspace = loadWorkspaceLocal(createInitialWorkspace(migratedCV, {
-      lang: migratedLang,
-      template: migratedTemplate,
-      photoOn: migratedPhotoOn,
-    }));
-    const document = activeDocument(loadedWorkspace);
-    setWorkspace(loadedWorkspace);
-    setCV({ ...seed, ...document.cv, projects: document.cv.projects ?? [], customSections: document.cv.customSections ?? [] });
-    setLang(document.settings.lang);
-    setTemplate(document.settings.template);
-    setPhotoOn(document.settings.photoOn);
-    saveWorkspaceLocal(loadedWorkspace);
+    // Startup is deliberately blank. Existing CV libraries are restored only
+    // from an authorized cloud source, never from stale demo/local editor state.
+    const startupWorkspace = createInitialWorkspace(blankCV, {
+      lang: "es",
+      template: "ats",
+      photoOn: false,
+    });
+    setWorkspace(startupWorkspace);
+    setCV(structuredClone(blankCV));
+    setLang("es");
+    setTemplate("ats");
+    setPhotoOn(false);
     setWorkspaceReady(true);
   }, []);
 
@@ -347,17 +325,8 @@ export default function Home() {
     loadRuntimeCloudConfig().then(setCloudConfig);
     const storedGoogleToken = loadStoredGoogleToken();
     setGoogleToken(storedGoogleToken);
-    if (storedGoogleToken) {
-      loadGoogleBackup<BackupDocument>(storedGoogleToken).then((backup) => {
-        if (!backup) return;
-        if (backup.schema === 2 && isWorkspace(backup.workspace)) {
-          const merged = mergeWorkspaces(workspaceWithCurrent(), backup.workspace);
-          applyBackup({ ...backup, workspace: merged });
-        } else {
-          applyBackup(backup);
-        }
-      }).catch(() => undefined);
-    }
+    // A remembered Drive authorization is kept available, but Drive data is not
+    // auto-applied here. This prevents it from racing with/restoring over EC2.
     // La cookie HttpOnly permite reconectar sin volver a pedir la contraseña.
     restoreServerSession().then(async (session) => {
       setServerSession(session);
@@ -368,12 +337,7 @@ export default function Home() {
       const latest = await loadServerBackup();
       if (latest && !isEncryptedEnvelope(latest.payload)) {
         const document = latest.payload as BackupDocument;
-      if (document.schema === 2 && isWorkspace(document.workspace)) {
-        const merged = mergeWorkspaces(workspaceWithCurrent(), document.workspace);
-        applyBackup({ ...document, workspace: merged });
-      } else {
-        applyBackup(document);
-      }
+      applyBackup(document);
         setServerRevision(latest.revision);
         serverRevisionRef.current = latest.revision;
         setSelectedRevision(latest.revision);
@@ -423,32 +387,7 @@ export default function Home() {
   const workspaceWithCurrent = () => replaceCurrentDocument(workspace, cv, { lang, template, photoOn });
   const backupDocument = (): BackupDocument => ({ schema: 2, savedAt: new Date().toISOString(), workspace: workspaceWithCurrent() });
 
-  // Conserva cada edición localmente de inmediato y crea una revisión EC2 tras una pausa breve.
-  useEffect(() => {
-    if (!workspaceReady) return;
-    const updatedWorkspace = replaceCurrentDocument(workspace, cv, { lang, template, photoOn });
-    saveWorkspaceLocal(updatedWorkspace);
-    localStorage.setItem("codecafe-cv", JSON.stringify(cv));
-    localStorage.setItem("codecafe-cv-settings", JSON.stringify({ lang, template, photoOn }));
-    if (!serverSession) return;
-    const timer = window.setTimeout(() => {
-      const document: BackupDocument = { schema: 2, savedAt: new Date().toISOString(), workspace: updatedWorkspace };
-      ec2SaveQueueRef.current = ec2SaveQueueRef.current.then(async () => {
-        setCloudStatus("syncing");
-        const digest = await backupDigest(document);
-        const result = await saveServerBackup(document, digest, serverRevisionRef.current, serverSession.csrfToken);
-        serverRevisionRef.current = result.revision;
-        setServerRevision(result.revision);
-        setSelectedRevision(result.revision);
-        setServerHistory(await listServerBackups());
-        setCloudStatus("synced");
-      }).catch((error: Error & { status?: number }) => {
-        setCloudStatus(error.status === 409 ? "conflict" : "error");
-        setCloudMessage(error.message);
-      });
-    }, 1200);
-    return () => window.clearTimeout(timer);
-  }, [cv, lang, photoOn, serverSession, template, workspace, workspaceReady]);
+  // Persistence is explicit: opening, restoring, or switching CVs never creates an EC2 revision.
   const googlePrintable = (): GooglePrintableCV => {
     const currentWorkspace = workspaceWithCurrent();
     const document = activeDocument(currentWorkspace);
@@ -529,12 +468,7 @@ export default function Home() {
       const latest = await loadServerBackup();
       if (latest && !isEncryptedEnvelope(latest.payload)) {
         const document = latest.payload as BackupDocument;
-      if (document.schema === 2 && isWorkspace(document.workspace)) {
-        const merged = mergeWorkspaces(workspaceWithCurrent(), document.workspace);
-        applyBackup({ ...document, workspace: merged });
-      } else {
-        applyBackup(document);
-      }
+      applyBackup(document);
         setServerRevision(latest.revision);
         serverRevisionRef.current = latest.revision;
         setSelectedRevision(latest.revision);
@@ -593,12 +527,7 @@ export default function Home() {
       setGoogleToken(token);
       const backup = await loadGoogleBackup<BackupDocument>(token);
       if (backup) {
-        if (backup.schema === 2 && isWorkspace(backup.workspace)) {
-          const merged = mergeWorkspaces(workspaceWithCurrent(), backup.workspace);
-          applyBackup({ ...backup, workspace: merged });
-        } else {
-          applyBackup(backup);
-        }
+        applyBackup(backup);
       }
       setCloudMessage(t.driveReady);
     } catch (error) {
