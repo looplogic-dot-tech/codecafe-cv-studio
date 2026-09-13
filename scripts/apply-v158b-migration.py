@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+from pathlib import Path
+
+path = Path('src/ec2-drive-migration-v154.ts')
+text = path.read_text(encoding='utf-8')
+
+old = '''  let merged = backupToWorkspace(payload as BackupDocument);\n\n  // Historical EC2 revisions may contain CVs/library records missing from the newest\n  // snapshot. Merge every retained plain workspace before moving to Drive.\n  const revisions = await listServerBackups();\n  for (const item of revisions) {\n    if (item.revision === latest.revision) continue;\n    try {\n      const historical = await loadServerBackupRevision(item.revision);\n      const historicalPayload = historical?.payload as BackupDocument | BackupEnvelope | undefined;\n      if (!historicalPayload || isEncryptedEnvelope(historicalPayload)) continue;\n      if (historicalPayload.schema === 2 && isWorkspace(historicalPayload.workspace)) {\n        merged = mergeWorkspaces(merged, historicalPayload.workspace);\n      }\n    } catch {}\n  }\n\n  return merged;\n'''
+
+new = '''  const candidates: CVWorkspace[] = [backupToWorkspace(payload as BackupDocument)];\n\n  // Older retained revisions are inspected, but they are NOT blindly unioned.\n  // Empty/default workspaces created by the old bug must never be migrated to Drive.\n  const revisions = await listServerBackups();\n  for (const item of revisions) {\n    if (item.revision === latest.revision) continue;\n    try {\n      const historical = await loadServerBackupRevision(item.revision);\n      const historicalPayload = historical?.payload as BackupDocument | BackupEnvelope | undefined;\n      if (!historicalPayload || isEncryptedEnvelope(historicalPayload)) continue;\n      if (historicalPayload.schema === 2 && isWorkspace(historicalPayload.workspace)) {\n        candidates.push(historicalPayload.workspace);\n      }\n    } catch {}\n  }\n\n  // Prefer the workspace that contains the richest real user data. A Professional\n  // Library is weighted heavily because it must survive independently of CV versions.\n  const score = (workspace: CVWorkspace): number => {\n    const libraries = workspace.professionalLibraries ?? [];\n    const libraryRecords = libraries.reduce((total, library) => total + library.records.length, 0);\n    const meaningfulDocuments = workspace.documents.filter((document) => {\n      const cv: any = document.cv;\n      return [cv?.name, cv?.title, cv?.email, cv?.summary, cv?.skills, cv?.coreSkills, cv?.tools, cv?.education]\n        .some((value) => typeof value === "string" && value.trim().length > 0);\n    }).length;\n    return libraryRecords * 100000 + libraries.length * 10000 + meaningfulDocuments * 1000 + workspace.documents.length;\n  };\n\n  candidates.sort((left, right) => score(right) - score(left));\n  return candidates[0];\n'''
+
+if old not in text:
+    raise SystemExit('v1.5.8 migration history block not found')
+
+path.write_text(text.replace(old, new, 1), encoding='utf-8')
+print('v1.5.8b applied: migration selects richest valid historical workspace and ignores empty/default history.')
