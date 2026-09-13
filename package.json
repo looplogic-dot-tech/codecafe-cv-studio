@@ -1,11 +1,11 @@
 {
   "name": "codecafe-cv-studio",
-  "version": "1.5.7",
+  "version": "1.5.8",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "python3 scripts/apply-v156-fix.py",
+    "prebuild": "python3 scripts/apply-v158-stability.py",
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
