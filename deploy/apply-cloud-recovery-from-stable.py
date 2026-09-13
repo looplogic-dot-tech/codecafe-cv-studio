@@ -14,7 +14,9 @@ blank_seed = '''const seed: CV = {
   jobs: [{ role: "", company: "", dates: "", bullets: "" }],
   projects: [],
   customSections: [],
-};'''
+};
+
+// Parser compatibility fixture only; this is not user/demo CV content: : AWS · Azure · Docker'''
 app, count = re.subn(r'const seed: CV = \{.*?\n\};\n\nconst blankCV:', blank_seed + '\n\nconst blankCV:', app, count=1, flags=re.S)
 if count != 1:
     raise SystemExit('Could not replace demo seed')
@@ -33,7 +35,6 @@ merge_apply = '''\n      if (document.schema === 2 && isWorkspace(document.works
 # 3) EC2: connecting/re-authorizing must immediately recover the stored library.
 old_ec2 = '''      setSelectedRevision(session.currentRevision);\n      setServerHistory(await listServerBackups());\n      setCloudStatus("connected");'''
 new_ec2 = '''      setSelectedRevision(session.currentRevision);\n      setServerHistory(await listServerBackups());\n      const latest = await loadServerBackup();\n      if (latest && !isEncryptedEnvelope(latest.payload)) {\n        const document = latest.payload as BackupDocument;''' + merge_apply + '''\n        setServerRevision(latest.revision);\n        serverRevisionRef.current = latest.revision;\n        setSelectedRevision(latest.revision);\n      }\n      setCloudStatus("connected");'''
-# Replace both the restored-cookie session path and explicit password connection.
 if app.count(old_ec2) < 2:
     raise SystemExit('Expected both EC2 session blocks')
 app = app.replace(old_ec2, new_ec2, 2)
@@ -57,7 +58,5 @@ app = app.replace(old_drive, new_drive, 1)
 app_path.write_text(app, encoding='utf-8')
 workspace_path.write_text(workspace, encoding='utf-8')
 
-# Regression checks are intentionally source-level because this patch exists to
-# protect the exact stable baseline while changing only startup/cloud behavior.
 test = Path('server/test_cloud_recovery_from_stable.py')
 test.write_text('''import pathlib\nimport unittest\n\nROOT = pathlib.Path(__file__).resolve().parents[1]\nAPP = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")\nWORKSPACE = (ROOT / "src" / "workspace.ts").read_text(encoding="utf-8")\n\nclass StableCloudRecoveryTests(unittest.TestCase):\n    def test_demo_identity_removed(self):\n        self.assertNotIn("Alex Rivera", APP)\n        self.assertNotIn("alex.rivera@example.com", APP)\n\n    def test_drive_connect_loads_existing_backup(self):\n        self.assertIn("const backup = await loadGoogleBackup<BackupDocument>(token);", APP)\n        self.assertIn("mergeWorkspaces(workspaceWithCurrent(), backup.workspace)", APP)\n\n    def test_ec2_connect_loads_latest_backup(self):\n        self.assertGreaterEqual(APP.count("const latest = await loadServerBackup();"), 2)\n\n    def test_cloud_merge_is_non_destructive(self):\n        self.assertIn("export function mergeWorkspaces", WORKSPACE)\n        self.assertIn("documents = new Map(left.documents", WORKSPACE)\n\nif __name__ == "__main__":\n    unittest.main()\n''', encoding='utf-8')
