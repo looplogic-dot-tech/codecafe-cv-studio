@@ -13,6 +13,7 @@ import { installPrintEditorV3 } from "./printEditorV3";
 import { installSyncNotice } from "./syncNotice";
 import { installMarginGuideFixV153 } from "./margin-guide-fix-v153";
 import { installGoogleDriveAutoLoadV153 } from "./google-drive-autoload-v153";
+import { installEc2DriveMigrationV154 } from "./ec2-drive-migration-v154";
 import { removeAlexRiveraDemoData } from "./startupCleanup";
 
 function reopenMyCvsAfterRender(): void {
@@ -51,3 +52,4 @@ installPrintEditorV3();
 installSyncNotice();
 installMarginGuideFixV153();
 installGoogleDriveAutoLoadV153();
+installEc2DriveMigrationV154();
