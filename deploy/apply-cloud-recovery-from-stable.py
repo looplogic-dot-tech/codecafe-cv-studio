@@ -2,61 +2,88 @@ from pathlib import Path
 import re
 
 app_path = Path('src/App.tsx')
-workspace_path = Path('src/workspace.ts')
 app = app_path.read_text(encoding='utf-8')
-workspace = workspace_path.read_text(encoding='utf-8')
 
-# 1) Remove the demo Alex Rivera fallback. Production must start from empty data
-# whenever there is no valid local workspace to restore.
-blank_seed = '''const seed: CV = {
-  name: "", title: "", email: "", phone: "", location: "", linkedin: "", photo: "",
-  summary: "", skills: "", coreSkills: "", tools: "", certifications: "", education: "", languages: "",
-  jobs: [{ role: "", company: "", dates: "", bullets: "" }],
-  projects: [],
-  customSections: [],
-};
+# This patch is intentionally limited to startup/recovery/persistence behavior.
+# It runs on the branch that descends directly from the known-good e4d09fe baseline.
 
-// Parser compatibility fixture only; this is not user/demo CV content: : AWS · Azure · Docker'''
-app, count = re.subn(r'const seed: CV = \{.*?\n\};\n\nconst blankCV:', blank_seed + '\n\nconst blankCV:', app, count=1, flags=re.S)
-if count != 1:
-    raise SystemExit('Could not replace demo seed')
+# 1) The editor must always start blank. Do not reopen a previous local CV and do
+# not overwrite browser storage merely because the application was opened.
+app = app.replace('  loadWorkspaceLocal,\n', '')
+app = app.replace('  mergeWorkspaces,\n', '')
 
-# 2) Add non-destructive workspace merge support. Cloud recovery must add/update
-# stored CVs without deleting CVs that exist only in the current browser.
-app = app.replace('  isWorkspace,\n  replaceCurrentDocument,', '  isWorkspace,\n  mergeWorkspaces,\n  replaceCurrentDocument,', 1)
+startup_pattern = re.compile(
+    r'''  useEffect\(\(\) => \{\n'''
+    r'''    const stored = localStorage\.getItem\("codecafe-cv"\);.*?'''
+    r'''    setWorkspaceReady\(true\);\n'''
+    r'''  \}, \[\]\);''',
+    re.S,
+)
+startup_replacement = '''  useEffect(() => {\n    // Startup is deliberately blank. Existing CV libraries are restored only\n    // from an authorized cloud source, never from stale demo/local editor state.\n    const startupWorkspace = createInitialWorkspace(blankCV, {\n      lang: "es",\n      template: "ats",\n      photoOn: false,\n    });\n    setWorkspace(startupWorkspace);\n    setCV(structuredClone(blankCV));\n    setLang("es");\n    setTemplate("ats");\n    setPhotoOn(false);\n    setWorkspaceReady(true);\n  }, []);'''
+app, startup_count = startup_pattern.subn(startup_replacement, app, count=1)
+if startup_count not in (0, 1):
+    raise SystemExit('Unexpected startup block count')
 
-merge_function = '''\n\n// Non-destructive cloud recovery: keep documents from both sides and prefer the\n// newest copy when the same document id exists locally and remotely.\nexport function mergeWorkspaces(local: CVWorkspace, remote: CVWorkspace): CVWorkspace {\n  const left = normalizeWorkspace(local);\n  const right = normalizeWorkspace(remote);\n  const documents = new Map(left.documents.map((document) => [document.id, document]));\n  for (const document of right.documents) {\n    const existing = documents.get(document.id);\n    if (!existing || document.updatedAt > existing.updatedAt) documents.set(document.id, document);\n  }\n  const collections = new Map(left.collections.map((collection) => [collection.id, collection]));\n  for (const collection of right.collections) if (!collections.has(collection.id)) collections.set(collection.id, collection);\n  const profiles = new Map((left.profiles ?? []).map((profile) => [profile.id, profile]));\n  for (const profile of right.profiles ?? []) if (!profiles.has(profile.id)) profiles.set(profile.id, profile);\n  return normalizeWorkspace({\n    ...left,\n    collections: [...collections.values()],\n    documents: [...documents.values()],\n    profiles: [...profiles.values()],\n    activeProfileId: left.activeProfileId,\n    activeDocumentId: left.activeDocumentId,\n  });\n}\n'''
-if 'export function mergeWorkspaces(' not in workspace:
-    workspace = workspace.replace('\nexport function saveWorkspaceLocal(workspace: CVWorkspace): void {', merge_function + '\nexport function saveWorkspaceLocal(workspace: CVWorkspace): void {', 1)
+# 2) Cloud recovery is authoritative. A recovered EC2/Drive workspace replaces
+# the temporary blank startup workspace; it must not merge Alex/New CV pollution
+# from old browser state into the recovered library.
+app = re.sub(
+    r'''        if \(backup\.schema === 2 && isWorkspace\(backup\.workspace\)\) \{\n'''
+    r'''          const merged = mergeWorkspaces\(workspaceWithCurrent\(\), backup\.workspace\);\n'''
+    r'''          applyBackup\(\{ \.\.\.backup, workspace: merged \}\);\n'''
+    r'''        \} else \{\n'''
+    r'''          applyBackup\(backup\);\n'''
+    r'''        \}''',
+    '        applyBackup(backup);',
+    app,
+)
 
-# Helper snippet used whenever a cloud workspace is recovered.
-merge_apply = '''\n      if (document.schema === 2 && isWorkspace(document.workspace)) {\n        const merged = mergeWorkspaces(workspaceWithCurrent(), document.workspace);\n        applyBackup({ ...document, workspace: merged });\n      } else {\n        applyBackup(document);\n      }'''
+app = re.sub(
+    r'''      if \(document\.schema === 2 && isWorkspace\(document\.workspace\)\) \{\n'''
+    r'''        const merged = mergeWorkspaces\(workspaceWithCurrent\(\), document\.workspace\);\n'''
+    r'''        applyBackup\(\{ \.\.\.document, workspace: merged \}\);\n'''
+    r'''      \} else \{\n'''
+    r'''        applyBackup\(document\);\n'''
+    r'''      \}''',
+    '      applyBackup(document);',
+    app,
+)
 
-# 3) EC2: connecting/re-authorizing must immediately recover the stored library.
-old_ec2 = '''      setSelectedRevision(session.currentRevision);\n      setServerHistory(await listServerBackups());\n      setCloudStatus("connected");'''
-new_ec2 = '''      setSelectedRevision(session.currentRevision);\n      setServerHistory(await listServerBackups());\n      const latest = await loadServerBackup();\n      if (latest && !isEncryptedEnvelope(latest.payload)) {\n        const document = latest.payload as BackupDocument;''' + merge_apply + '''\n        setServerRevision(latest.revision);\n        serverRevisionRef.current = latest.revision;\n        setSelectedRevision(latest.revision);\n      }\n      setCloudStatus("connected");'''
-if app.count(old_ec2) < 2:
-    raise SystemExit('Expected both EC2 session blocks')
-app = app.replace(old_ec2, new_ec2, 2)
+# The same patterns can appear at a different indentation level in connect handlers.
+app = re.sub(
+    r'''        if \(document\.schema === 2 && isWorkspace\(document\.workspace\)\) \{\n'''
+    r'''          const merged = mergeWorkspaces\(workspaceWithCurrent\(\), document\.workspace\);\n'''
+    r'''          applyBackup\(\{ \.\.\.document, workspace: merged \}\);\n'''
+    r'''        \} else \{\n'''
+    r'''          applyBackup\(document\);\n'''
+    r'''        \}''',
+    '        applyBackup(document);',
+    app,
+)
 
-# Make the session-restoration effect wait until the local workspace has been loaded,
-# preventing a race in which an old local initialization overwrites cloud recovery.
-old_effect = '''  useEffect(() => {\n    loadRuntimeCloudConfig().then(setCloudConfig);\n    setGoogleToken(loadStoredGoogleToken());\n    // La cookie HttpOnly permite reconectar sin volver a pedir la contraseña.'''
-new_effect = '''  useEffect(() => {\n    if (!workspaceReady) return;\n    loadRuntimeCloudConfig().then(setCloudConfig);\n    const storedGoogleToken = loadStoredGoogleToken();\n    setGoogleToken(storedGoogleToken);\n    if (storedGoogleToken) {\n      loadGoogleBackup<BackupDocument>(storedGoogleToken).then((backup) => {\n        if (!backup) return;\n        if (backup.schema === 2 && isWorkspace(backup.workspace)) {\n          const merged = mergeWorkspaces(workspaceWithCurrent(), backup.workspace);\n          applyBackup({ ...backup, workspace: merged });\n        } else {\n          applyBackup(backup);\n        }\n      }).catch(() => undefined);\n    }\n    // La cookie HttpOnly permite reconectar sin volver a pedir la contraseña.'''
-if old_effect not in app:
-    raise SystemExit('Could not locate cloud startup effect')
-app = app.replace(old_effect, new_effect, 1)
-app = app.replace('  }, []);\n\n  const score = useMemo(() => {', '  }, [workspaceReady]);\n\n  const score = useMemo(() => {', 1)
+# 3) Remove the dangerous automatic EC2 revision writer. Previously every state
+# transition (startup, opening a CV, cloud restore, etc.) could create a revision
+# after 1.2 seconds. From now on only the explicit Save -> syncCloud path writes.
+autosave_pattern = re.compile(
+    r'''  // Conserva cada edición localmente de inmediato y crea una revisión EC2 tras una pausa breve\.\n'''
+    r'''  useEffect\(\(\) => \{.*?'''
+    r'''  \}, \[cv, lang, photoOn, serverSession, template, workspace, workspaceReady\]\);\n''',
+    re.S,
+)
+app, autosave_count = autosave_pattern.subn(
+    '  // Persistence is explicit: opening, restoring, or switching CVs never creates an EC2 revision.\n',
+    app,
+    count=1,
+)
+if autosave_count not in (0, 1):
+    raise SystemExit('Unexpected automatic-save block count')
 
-# Google Drive: authorization must immediately load/merge the existing Drive library.
-old_drive = '''      setGoogleToken(await authorizeGoogleDrive(cloudConfig.googleClientId));\n      setCloudMessage(t.driveReady);'''
-new_drive = '''      const token = await authorizeGoogleDrive(cloudConfig.googleClientId);\n      setGoogleToken(token);\n      const backup = await loadGoogleBackup<BackupDocument>(token);\n      if (backup) {\n        if (backup.schema === 2 && isWorkspace(backup.workspace)) {\n          const merged = mergeWorkspaces(workspaceWithCurrent(), backup.workspace);\n          applyBackup({ ...backup, workspace: merged });\n        } else {\n          applyBackup(backup);\n        }\n      }\n      setCloudMessage(t.driveReady);'''
-if old_drive not in app:
-    raise SystemExit('Could not locate Drive connection block')
-app = app.replace(old_drive, new_drive, 1)
+# 4) Guardrails: the demo identity must not exist in production startup data.
+if 'name: "Alex Rivera"' in app or 'alex.rivera@example.com' in app:
+    raise SystemExit('Demo identity is still present in production source')
 
 app_path.write_text(app, encoding='utf-8')
-workspace_path.write_text(workspace, encoding='utf-8')
 
+# Regression tests for the exact failure that damaged the cloud history.
 test = Path('server/test_cloud_recovery_from_stable.py')
-test.write_text('''import pathlib\nimport unittest\n\nROOT = pathlib.Path(__file__).resolve().parents[1]\nAPP = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")\nWORKSPACE = (ROOT / "src" / "workspace.ts").read_text(encoding="utf-8")\n\nclass StableCloudRecoveryTests(unittest.TestCase):\n    def test_demo_identity_removed(self):\n        self.assertNotIn("Alex Rivera", APP)\n        self.assertNotIn("alex.rivera@example.com", APP)\n\n    def test_drive_connect_loads_existing_backup(self):\n        self.assertIn("const backup = await loadGoogleBackup<BackupDocument>(token);", APP)\n        self.assertIn("mergeWorkspaces(workspaceWithCurrent(), backup.workspace)", APP)\n\n    def test_ec2_connect_loads_latest_backup(self):\n        self.assertGreaterEqual(APP.count("const latest = await loadServerBackup();"), 2)\n\n    def test_cloud_merge_is_non_destructive(self):\n        self.assertIn("export function mergeWorkspaces", WORKSPACE)\n        self.assertIn("documents = new Map(left.documents", WORKSPACE)\n\nif __name__ == "__main__":\n    unittest.main()\n''', encoding='utf-8')
+test.write_text('''import pathlib\nimport unittest\n\nROOT = pathlib.Path(__file__).resolve().parents[1]\nAPP = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")\n\nclass StableCloudRecoveryTests(unittest.TestCase):\n    def test_demo_identity_removed(self):\n        self.assertNotIn('name: "Alex Rivera"', APP)\n        self.assertNotIn("alex.rivera@example.com", APP)\n\n    def test_startup_is_blank_and_does_not_reopen_local_workspace(self):\n        self.assertIn("const startupWorkspace = createInitialWorkspace(blankCV", APP)\n        self.assertNotIn("loadWorkspaceLocal(", APP)\n\n    def test_cloud_restore_does_not_merge_stale_local_demo_state(self):\n        self.assertNotIn("mergeWorkspaces(workspaceWithCurrent()", APP)\n        self.assertIn("applyBackup(backup);", APP)\n        self.assertIn("applyBackup(document);", APP)\n\n    def test_only_explicit_save_path_can_write_ec2_revision(self):\n        # There must be exactly one server write call, inside syncCloud().\n        self.assertEqual(APP.count("saveServerBackup("), 1)\n        self.assertNotIn("}, 1200);", APP)\n        self.assertNotIn("crea una revisión EC2 tras una pausa", APP)\n\nif __name__ == "__main__":\n    unittest.main()\n''', encoding='utf-8')
