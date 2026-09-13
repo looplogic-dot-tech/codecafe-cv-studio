@@ -13,10 +13,11 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("MAX_ACTIVE_CVS = 20", workspace)
         self.assertIn("candidate.documents.length <= MAX_ACTIVE_CVS", workspace)
 
-    def test_legacy_local_copy_is_still_migrated(self):
+    def test_startup_is_blank_instead_of_migrating_stale_local_editor_state(self):
         app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
-        self.assertIn('localStorage.getItem("codecafe-cv")', app)
-        self.assertIn("createInitialWorkspace(migratedCV", app)
+        self.assertNotIn('localStorage.getItem("codecafe-cv")', app)
+        self.assertNotIn("createInitialWorkspace(migratedCV", app)
+        self.assertIn("const startupWorkspace = createInitialWorkspace(blankCV", app)
 
     def test_cloud_backup_uses_workspace_schema_two(self):
         app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
