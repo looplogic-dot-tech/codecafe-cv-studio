@@ -23,4 +23,6 @@
 .structuredLine b,.repository b{color:#39465a}.repository{overflow-wrap:anywhere}.repository a{color:inherit;text-decoration:none}.structuredLine a{color:#1e61d7;text-decoration:underline;text-underline-offset:2px}
 .cloudActions button:disabled{cursor:not-allowed;opacity:.45}
 .revisionPicker{display:flex;align-items:end;gap:9px;margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#f8fafc}.revisionPicker label{flex:1}.revisionPicker button{border:1px solid #ced8e5;border-radius:8px;background:#fff;color:#31405a;padding:10px 11px;font-size:10px;font-weight:750;white-space:nowrap}
+.topActionButton{display:flex;align-items:center;gap:6px;border:1px solid #d4dce7;background:#fff;color:#526078;border-radius:9px;padding:9px 11px;font-size:11px;font-weight:750}.topActionButton:hover{border-color:#9eb4d3;background:#f7f9fc}.topActionButton.cloudButton.connected,.topActionButton.cloudButton.synced{color:#137656;border-color:#b9dfd2;background:#f2fbf7}.inheritBasics{flex-direction:row;align-items:center;align-self:center;gap:8px}.inheritBasics input{margin:0}.aboutAuthor a{color:var(--blue);font-size:11px;text-decoration:none}
+.cloudSyncNow{width:100%;margin-top:15px}
 @media(max-width:600px){.revisionPicker{align-items:stretch;flex-direction:column}}

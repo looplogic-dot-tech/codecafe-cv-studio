@@ -18,7 +18,8 @@ persona real y debe reemplazarse con la información de cada usuario.
 - Copias legibles y versionadas en EC2, sin sustituir el guardado local.
 - Respaldo JSON importable y exportable.
 - Conector opcional de Google Drive con permiso limitado `drive.file`.
-- Impresión o exportación a PDF en tamaño A4.
+- Vista previa, impresión o exportación a PDF optimizada para papel **Letter / Carta (8.5 × 11 in)**.
+- Márgenes y saltos manuales de impresión almacenados por CV para poder reutilizarlos al sincronizar entre dispositivos.
 - Exportación de texto compatible con ATS.
 - Biblioteca visual adaptable a teléfono con un máximo de 20 CVs en total.
 - Colecciones para separar CVs de IT, construcción, uso general u otras categorías.

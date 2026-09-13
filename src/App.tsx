@@ -9,6 +9,7 @@ import {
   decryptBackup,
   disconnectServer,
   loadGoogleBackup,
+  hasKnownGoogleGrant,
   loadStoredGoogleToken,
   listServerBackups,
   loadRuntimeCloudConfig,
@@ -35,6 +36,7 @@ import {
   MAX_ACTIVE_CVS,
   newId,
   isWorkspace,
+  mergeWorkspaces,
   replaceCurrentDocument,
   saveWorkspaceLocal,
 } from "./workspace";
@@ -61,31 +63,6 @@ type WorkspaceBackupDocument = { schema: 2; savedAt: string; workspace: CVWorksp
 type BackupDocument = LegacyBackupDocument | WorkspaceBackupDocument;
 type CloudStatus = "local" | "connecting" | "connected" | "syncing" | "synced" | "error" | "conflict";
 
-const seed: CV = {
-  name: "Alex Rivera",
-  title: "Especialista en soporte técnico",
-  email: "alex.rivera@example.com",
-  phone: "+52 000 000 0000",
-  location: "México",
-  linkedin: "linkedin.com/in/alex-rivera-demo",
-  photo: "",
-  summary: "Profesional de soporte técnico con experiencia en sistemas, redes y atención a usuarios. Orientado al diagnóstico metódico, la documentación clara y la mejora de procesos operativos.",
-  skills: "Soporte técnico · Linux · Windows · Redes TCP/IP · Documentación · Git",
-  coreSkills: "Technical Support · Troubleshooting · Network Diagnostics · Customer Service",
-  tools: "Sistemas Operativos: Linux · Windows · Windows Server\nRedes e Infraestructura: TCP/IP · DHCP · DNS\nSoporte y Administración: ServiceNow · Jira · Confluence\nCLI y Automatización: Bash · PowerShell · Python\nCloud y Virtualización: AWS · Azure · Docker\nDesarrollo y Datos: Flask · SQLite · Git · GitHub",
-  certifications: "Certificación técnica de ejemplo\nCurso profesional de ejemplo",
-  education: "Ingeniería en Sistemas — Universidad de ejemplo, 2025",
-  languages: "Español — Nativo\nInglés — Profesional",
-  jobs: [
-    { role: "Especialista en soporte técnico", company: "Empresa de tecnología", dates: "2024 — Actualidad", bullets: "Atención y seguimiento de incidentes de usuarios.\nDiagnóstico de conectividad, sistemas operativos y equipos de oficina.\nDocumentación de soluciones en la base de conocimiento." },
-    { role: "Técnico de sistemas", company: "Servicios profesionales", dates: "2021 — 2024", bullets: "Instalación y mantenimiento de estaciones de trabajo.\nSoporte de redes locales, respaldos y acceso remoto seguro." },
-  ],
-  projects: [
-    { name: "Proyecto demostrativo", stack: "JavaScript · HTML · CSS", description: "Herramienta de ejemplo para organizar información y simplificar un proceso operativo.", repository: "" },
-  ],
-  customSections: [],
-};
-
 const blankCV: CV = {
   name: "", title: "", email: "", phone: "", location: "", linkedin: "", photo: "",
   summary: "", skills: "", coreSkills: "", tools: "", certifications: "", education: "", languages: "",
@@ -94,9 +71,12 @@ const blankCV: CV = {
   customSections: [],
 };
 
+// Producción empieza vacía. Los ejemplos nunca deben convertirse en datos del usuario.
+const seed: CV = structuredClone(blankCV);
+
 const copy = {
   es: {
-    tagline: "Tu experiencia, bien presentada.", save: "Guardar", saved: "✓ Guardado", pdf: "Descargar PDF",
+    tagline: "Tu experiencia, bien presentada.", save: "Sincronizar", saved: "✓ Sincronizado", pdf: "Descargar PDF",
     eyebrow: "EDITOR DE CONTENIDO", title: "Construye tu CV", complete: "completo",
     tabs: ["Perfil", "Experiencia", "IT y proyectos", "Formación", "Diseño"],
     fullName: "Nombre completo", professionalTitle: "Título profesional", email: "Correo", phone: "Teléfono",
@@ -118,10 +98,10 @@ const copy = {
     certificationsHeading: "Certificaciones", educationHeading: "Educación", languagesHeading: "Idiomas",
     atsGood: "Lectura ATS optimizada", atsDetail: "Encabezados estándar · Texto seleccionable · Sin tablas complejas",
     docLanguage: "Idioma del CV", optional: "Opcional: las secciones vacías no se imprimen",
-    cloud: "Copias en la nube", cloudTitle: "Sincronización en la nube", cloudIntro: "Tu copia local siempre se conserva. EC2 mantiene su historial protegido; Google Drive recibe archivos normales y legibles.",
+    cloud: "Sincronizar", cloudTitle: "Sincronización en la nube", cloudIntro: "Tu copia local siempre se conserva. Puedes usar tu propio Google Drive; EC2 funciona como respaldo secundario.",
     syncPassword: "Contraseña de EC2", connectEc2: "Conectar EC2", disconnect: "Desconectar",
     loadEc2: "Cargar desde EC2", connectDrive: "Conectar Google Drive", loadDrive: "Cargar desde Drive",
-    exportBackup: "Descargar respaldo", importBackup: "Abrir respaldo", close: "Cerrar",
+    exportBackup: "Descargar respaldo", importBackup: "Abrir respaldo", syncNow: "Sincronizar ahora", close: "Cerrar",
     localOnly: "Guardado local", connecting: "Conectando…", connected: "EC2 conectado", syncing: "Sincronizando…",
     synced: "Destinos conectados actualizados", syncError: "Error de sincronización", conflict: "Existe una versión más reciente",
     driveReady: "Google Drive conectado", driveAvailable: "Listo para conectar", driveUnavailable: "Google Drive aún no está configurado",
@@ -140,7 +120,7 @@ const copy = {
     profileUser: "Perfil", newProfile: "Crear perfil", profileName: "Nombre de la persona:",
   },
   en: {
-    tagline: "Your experience, clearly presented.", save: "Save", saved: "✓ Saved", pdf: "Download PDF",
+    tagline: "Your experience, clearly presented.", save: "Sync", saved: "✓ Synced", pdf: "Download PDF",
     eyebrow: "CONTENT EDITOR", title: "Build your résumé", complete: "complete",
     tabs: ["Profile", "Experience", "IT & Projects", "Education", "Design"],
     fullName: "Full name", professionalTitle: "Professional title", email: "Email", phone: "Phone",
@@ -162,10 +142,10 @@ const copy = {
     certificationsHeading: "Certifications", educationHeading: "Education", languagesHeading: "Languages",
     atsGood: "ATS-friendly structure", atsDetail: "Standard headings · Selectable text · No complex tables",
     docLanguage: "Résumé language", optional: "Optional: empty sections are not printed",
-    cloud: "Cloud copies", cloudTitle: "Cloud synchronization", cloudIntro: "Your local copy is always preserved. EC2 keeps its protected history; Google Drive receives normal, readable files.",
+    cloud: "Sync", cloudTitle: "Cloud synchronization", cloudIntro: "Your local copy is always preserved. You can use your own Google Drive; EC2 remains a secondary backup.",
     syncPassword: "EC2 password", connectEc2: "Connect EC2", disconnect: "Disconnect",
     loadEc2: "Load from EC2", connectDrive: "Connect Google Drive", loadDrive: "Load from Drive",
-    exportBackup: "Download backup", importBackup: "Open backup", close: "Close",
+    exportBackup: "Download backup", importBackup: "Open backup", syncNow: "Sync now", close: "Close",
     localOnly: "Saved locally", connecting: "Connecting…", connected: "EC2 connected", syncing: "Syncing…",
     synced: "Connected destinations updated", syncError: "Synchronization error", conflict: "A newer version exists",
     driveReady: "Google Drive connected", driveAvailable: "Ready to connect", driveUnavailable: "Google Drive is not configured yet",
@@ -208,6 +188,7 @@ function htmlLines(value: string): string {
 export type ToolLine = { category: string; content: string };
 
 // Interpreta cada renglón al renderizarlo; el texto original nunca se reemplaza ni migra.
+// Las líneas heredadas, por ejemplo ": AWS · Azure · Docker", siguen siendo válidas.
 export function parseToolLines(value: string): ToolLine[] {
   return value.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
     const markdownBold = line.match(/^\*\*(.+?)\*\*(.*)$/);
@@ -301,13 +282,18 @@ export default function Home() {
   const [cloudMessage, setCloudMessage] = useState("");
   const [syncPassword, setSyncPassword] = useState("");
   const [serverSession, setServerSession] = useState<ServerSession | null>(null);
+  const [ec2Loaded, setEc2Loaded] = useState(false);
   const [serverRevision, setServerRevision] = useState(0);
   const serverRevisionRef = useRef(0);
   const ec2SaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // Una sesión HttpOnly puede sobrevivir a cerrar la pestaña. Este indicador evita
+  // descargar la misma biblioteca más de una vez durante el arranque.
+  const restoredServerLibraryRef = useRef(false);
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const [serverHistory, setServerHistory] = useState<ServerBackupRevision[]>([]);
   const [selectedRevision, setSelectedRevision] = useState(0);
   const [googleToken, setGoogleToken] = useState("");
+  const [driveLoaded, setDriveLoaded] = useState(false);
   const [cloudConfig, setCloudConfig] = useState<RuntimeCloudConfig>({});
   const [workspace, setWorkspace] = useState<CVWorkspace>(() => createInitialWorkspace(seed, { lang: "es", template: "ats", photoOn: false }));
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -359,15 +345,6 @@ export default function Home() {
   useEffect(() => {
     loadRuntimeCloudConfig().then(setCloudConfig);
     setGoogleToken(loadStoredGoogleToken());
-    // La cookie HttpOnly permite reconectar sin volver a pedir la contraseña.
-    restoreServerSession().then(async (session) => {
-      setServerSession(session);
-      setServerRevision(session.currentRevision);
-      serverRevisionRef.current = session.currentRevision;
-      setSelectedRevision(session.currentRevision);
-      setServerHistory(await listServerBackups());
-      setCloudStatus("connected");
-    }).catch(() => undefined);
   }, []);
 
   const score = useMemo(() => {
@@ -418,25 +395,28 @@ export default function Home() {
     saveWorkspaceLocal(updatedWorkspace);
     localStorage.setItem("codecafe-cv", JSON.stringify(cv));
     localStorage.setItem("codecafe-cv-settings", JSON.stringify({ lang, template, photoOn }));
-    if (!serverSession) return;
+    if (!serverSession && !googleToken) return;
     const timer = window.setTimeout(() => {
       const document: BackupDocument = { schema: 2, savedAt: new Date().toISOString(), workspace: updatedWorkspace };
       ec2SaveQueueRef.current = ec2SaveQueueRef.current.then(async () => {
         setCloudStatus("syncing");
-        const digest = await backupDigest(document);
-        const result = await saveServerBackup(document, digest, serverRevisionRef.current, serverSession.csrfToken);
-        serverRevisionRef.current = result.revision;
-        setServerRevision(result.revision);
-        setSelectedRevision(result.revision);
-        setServerHistory(await listServerBackups());
+        if (serverSession && ec2Loaded) {
+          const digest = await backupDigest(document);
+          const result = await saveServerBackup(document, digest, serverRevisionRef.current, serverSession.csrfToken);
+          serverRevisionRef.current = result.revision;
+          setServerRevision(result.revision);
+          setSelectedRevision(result.revision);
+          setServerHistory(await listServerBackups());
+        }
+        if (googleToken && driveLoaded) await saveGoogleBackup(googleToken, document, googlePrintable());
         setCloudStatus("synced");
       }).catch((error: Error & { status?: number }) => {
         setCloudStatus(error.status === 409 ? "conflict" : "error");
         setCloudMessage(error.message);
       });
-    }, 1200);
+    }, 2500);
     return () => window.clearTimeout(timer);
-  }, [cv, lang, photoOn, serverSession, template, workspace, workspaceReady]);
+  }, [cv, driveLoaded, ec2Loaded, googleToken, lang, photoOn, serverSession, template, workspace, workspaceReady]);
   const googlePrintable = (): GooglePrintableCV => {
     const currentWorkspace = workspaceWithCurrent();
     const document = activeDocument(currentWorkspace);
@@ -481,7 +461,7 @@ export default function Home() {
     setCloudStatus("syncing");
     setCloudMessage("");
     try {
-      if (serverSession) {
+      if (serverSession && ec2Loaded) {
         const document = backupDocument();
         const digest = await backupDigest(document);
         await ec2SaveQueueRef.current;
@@ -491,7 +471,7 @@ export default function Home() {
         setSelectedRevision(result.revision);
         setServerHistory(await listServerBackups());
       }
-      if (googleToken) await saveGoogleBackup(googleToken, backupDocument(), googlePrintable());
+      if (googleToken && driveLoaded) await saveGoogleBackup(googleToken, backupDocument(), googlePrintable());
       setCloudStatus("synced");
     } catch (error) {
       const failure = error as Error & { status?: number };
@@ -502,6 +482,27 @@ export default function Home() {
   const save = async () => {
     saveLocal();
     await syncCloud();
+  };
+  const mergeStoredBackup = async (backup: NonNullable<Awaited<ReturnType<typeof loadServerBackup>>>, preserved: CVWorkspace) => {
+    const payload = isEncryptedEnvelope(backup.payload)
+      ? await decryptBackup<BackupDocument>(backup.payload, syncPassword)
+      : backup.payload as BackupDocument;
+    if (payload.schema !== 2 || !isWorkspace(payload.workspace)) return preserved;
+    const merged = mergeWorkspaces(preserved, payload.workspace);
+    setWorkspace(merged);
+    saveWorkspaceLocal(merged);
+    const current = activeDocument(merged);
+    setCV({ ...seed, ...current.cv, projects: current.cv.projects ?? [], customSections: current.cv.customSections ?? [] });
+    setLang(current.settings.lang);
+    setTemplate(current.settings.template);
+    setPhotoOn(current.settings.photoOn);
+    return merged;
+  };
+  const refreshEc2Library = async (preserved: CVWorkspace) => {
+    const backup = await loadServerBackup();
+    const merged = backup ? await mergeStoredBackup(backup, preserved) : preserved;
+    setEc2Loaded(true);
+    return merged;
   };
   const connectEc2 = async () => {
     if (!syncPassword) return;
@@ -514,6 +515,7 @@ export default function Home() {
       serverRevisionRef.current = session.currentRevision;
       setSelectedRevision(session.currentRevision);
       setServerHistory(await listServerBackups());
+      await refreshEc2Library(workspaceWithCurrent());
       setCloudStatus("connected");
     } catch (error) {
       setCloudStatus("error");
@@ -523,6 +525,7 @@ export default function Home() {
   const disconnectEc2 = async () => {
     if (serverSession) await disconnectServer(serverSession.csrfToken).catch(() => undefined);
     setServerSession(null);
+    setEc2Loaded(false);
     setServerRevision(0);
     serverRevisionRef.current = 0;
     setSelectedRevision(0);
@@ -564,9 +567,93 @@ export default function Home() {
   const connectDrive = async () => {
     if (!cloudConfig.googleClientId) return;
     try {
-      setGoogleToken(await authorizeGoogleDrive(cloudConfig.googleClientId));
+      const token = await authorizeGoogleDrive(cloudConfig.googleClientId);
+      setGoogleToken(token);
+      // Autorizar es insuficiente: el siguiente paso siempre incorpora lo que
+      // ya existe en Drive a la biblioteca visible de esta instalación.
+      await refreshDriveLibrary(token, workspaceWithCurrent());
       setCloudMessage(t.driveReady);
     } catch (error) {
+      setCloudStatus("error");
+      setCloudMessage((error as Error).message);
+    }
+  };
+  const refreshDriveLibrary = async (token: string, preserved: CVWorkspace) => {
+    const backup = await loadGoogleBackup<BackupDocument>(token);
+    if (backup?.schema === 2 && isWorkspace(backup.workspace)) {
+      const merged = mergeWorkspaces(preserved, backup.workspace);
+      setWorkspace(merged);
+      saveWorkspaceLocal(merged);
+      // La biblioteca sí se había fusionado, pero el editor continuaba mostrando
+      // el estado anterior. Eso podía hacer parecer que la reautorización no cargó
+      // nada y, peor, dejaba una edición posterior basada en el CV equivocado.
+      const current = activeDocument(merged);
+      setCV({ ...seed, ...current.cv, projects: current.cv.projects ?? [], customSections: current.cv.customSections ?? [] });
+      setLang(current.settings.lang);
+      setTemplate(current.settings.template);
+      setPhotoOn(current.settings.photoOn);
+      setDriveLoaded(true);
+      return merged;
+    }
+    setDriveLoaded(true);
+    return preserved;
+  };
+  const usableDriveToken = async () => {
+    if (googleToken) return googleToken;
+    if (!cloudConfig.googleClientId || !hasKnownGoogleGrant()) return "";
+    const token = await authorizeGoogleDrive(cloudConfig.googleClientId);
+    setGoogleToken(token);
+    return token;
+  };
+  // La cookie de EC2 recupera la autorización, pero no contiene los CVs. Cargar
+  // únicamente el estado de sesión dejaba la pantalla local vacía tras volver a
+  // abrir CV Studio. Una vez lista la copia local, traemos y fusionamos el respaldo.
+  useEffect(() => {
+    if (!workspaceReady || restoredServerLibraryRef.current) return;
+    restoredServerLibraryRef.current = true;
+    let cancelled = false;
+    restoreServerSession().then(async (session) => {
+      if (cancelled) return;
+      setServerSession(session);
+      setServerRevision(session.currentRevision);
+      serverRevisionRef.current = session.currentRevision;
+      setSelectedRevision(session.currentRevision);
+      setServerHistory(await listServerBackups());
+      await refreshEc2Library(workspaceWithCurrent());
+      if (!cancelled) setCloudStatus("connected");
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  // La operación debe hacerse una vez con el espacio de trabajo ya inicializado.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceReady]);
+  const openLibrary = async () => {
+    const preserved = workspaceWithCurrent();
+    setWorkspace(preserved);
+    saveWorkspaceLocal(preserved);
+    try {
+      let combined = preserved;
+      if (serverSession) combined = await refreshEc2Library(combined);
+      const token = await usableDriveToken();
+      if (token) await refreshDriveLibrary(token, combined);
+    } catch (error) {
+      setDriveLoaded(false);
+      setCloudStatus("error");
+      setCloudMessage((error as Error).message);
+    }
+    setLibraryOpen(true);
+  };
+  const openCloud = async () => {
+    setCloudOpen(true);
+    const preserved = workspaceWithCurrent();
+    setWorkspace(preserved);
+    saveWorkspaceLocal(preserved);
+    try {
+      let combined = preserved;
+      if (serverSession) combined = await refreshEc2Library(combined);
+      const token = await usableDriveToken();
+      if (token) await refreshDriveLibrary(token, combined);
+    } catch (error) {
+      setDriveLoaded(false);
       setCloudStatus("error");
       setCloudMessage((error as Error).message);
     }
@@ -797,11 +884,10 @@ export default function Home() {
         <div className="topActions">
           <div className="profileSwitch"><label>{t.profileUser}<select value={workspace.activeProfileId} onChange={(event) => switchProfile(event.target.value)}>{(workspace.profiles ?? []).map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select></label><button onClick={createProfile} title={t.newProfile} aria-label={t.newProfile}>＋</button></div>
           <div className="langSwitch" aria-label={t.docLanguage}><button className={lang === "es" ? "selected" : ""} onClick={() => setLang("es")}>ES</button><button className={lang === "en" ? "selected" : ""} onClick={() => setLang("en")}>EN</button></div>
-          <button className="libraryButton" onClick={() => setLibraryOpen(true)} title={`${t.myCvs}: ${activeDocument(workspace).name}`}>▤ <span>{t.myCvs}</span></button>
-          <button className="libraryButton" onClick={() => setImportOpen(true)}>⇩ <span>{t.importCv}</span></button>
-          <button className="libraryButton" onClick={() => setAboutOpen(true)}>ⓘ <span>{t.aboutApp}</span></button>
-          <button className={`cloudButton ${cloudStatus}`} onClick={() => setCloudOpen(true)} title={t.cloud}>☁ <span>{cloudStatusText}</span></button>
-          <button className="ghost" onClick={save}>{saved ? t.saved : t.save}</button>
+          <button className="topActionButton" onClick={openLibrary} title={`${t.myCvs}: ${activeDocument(workspace).name}`}>▤ <span>{t.myCvs}</span></button>
+          <button className="topActionButton" onClick={() => setImportOpen(true)}>⇩ <span>{t.importCv}</span></button>
+          <button className="topActionButton" onClick={() => setAboutOpen(true)}>ⓘ <span>{t.aboutApp}</span></button>
+          <button className={`topActionButton cloudButton ${cloudStatus}`} onClick={openCloud} title={cloudStatusText}>☁ <span>{t.cloud}</span></button>
           <button className="primary" onClick={() => window.print()}>{t.pdf}</button>
         </div>
       </header>
@@ -921,7 +1007,7 @@ export default function Home() {
           <span className="eyebrow">CODECAFE SOFTWARE</span><h2 id="about-title">{t.aboutAppTitle}</h2>
           <div className="aboutVersion">{t.version} {packageInfo.version}</div>
           <p>{t.aboutDescription}</p>
-          <div className="aboutAuthor"><span>{t.developedBy}</span><strong>Jaime Sánchez Sáenz</strong></div>
+          <div className="aboutAuthor"><span>{t.developedBy}</span><strong>Jaime Sánchez Sáenz</strong><a href="mailto:contacto@codecafe.io">contacto@codecafe.io</a></div>
           <p className="aboutRights">{t.rights}</p>
           <button className="primary" onClick={() => setAboutOpen(false)}>{t.close}</button>
         </section>
@@ -950,6 +1036,7 @@ export default function Home() {
             </div>
           </div>
           <div className="cloudPortable"><button onClick={exportBackup}>{t.exportBackup}</button><label>{t.importBackup}<input type="file" accept="application/json,.json" onChange={importBackup} /></label></div>
+          <button className="cloudSyncNow primary" onClick={save}>{saved ? t.saved : t.syncNow}</button>
           <div className={`cloudNotice ${cloudStatus}`}>{cloudStatusText}{cloudMessage && <small>{cloudMessage}</small>}</div>
           <button className="cloudClose" onClick={() => setCloudOpen(false)}>{t.close}</button>
         </section>
