@@ -4,12 +4,14 @@ import App from "./App";
 import "./styles.css";
 import "./print-editor-v2.css";
 import "./print-editor-v15.css";
+import "./popup-radius-v151.css";
 import "./sync-notice.css";
 import "./professional-library.css";
 import "./library-composer.css";
 import { prepareLinkedWorkspaceFromStorage } from "./libraryLinking";
 import { installPrintEditorV3 } from "./printEditorV3";
 import { installSyncNotice } from "./syncNotice";
+import { installGoogleAuthCompat } from "./google-auth-compat";
 import { removeAlexRiveraDemoData } from "./startupCleanup";
 
 function reopenMyCvsAfterRender(): void {
@@ -35,6 +37,7 @@ function RootApp() {
   return <App key={revision} />;
 }
 
+installGoogleAuthCompat();
 removeAlexRiveraDemoData();
 prepareLinkedWorkspaceFromStorage();
 
