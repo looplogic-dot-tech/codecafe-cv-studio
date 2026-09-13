@@ -25,5 +25,14 @@ if old_block not in text:
     raise SystemExit('Could not find autosave block to protect')
 text = text.replace(old_block, new_block, 1)
 
+# 3) When an existing EC2 session is restored, load the current EC2 workspace
+#    before the user starts editing. This prevents stale localStorage from hiding
+#    the recovered CV/library workspace.
+old_restore = '''    restoreServerSession().then(async (session) => {\n      setServerSession(session);\n      setServerRevision(session.currentRevision);\n      serverRevisionRef.current = session.currentRevision;\n      setSelectedRevision(session.currentRevision);\n      setServerHistory(await listServerBackups());\n      setCloudStatus("connected");\n    }).catch(() => undefined);\n'''
+new_restore = '''    restoreServerSession().then(async (session) => {\n      setServerSession(session);\n      setServerRevision(session.currentRevision);\n      serverRevisionRef.current = session.currentRevision;\n      setSelectedRevision(session.currentRevision);\n      setServerHistory(await listServerBackups());\n\n      const backup = await loadServerBackup();\n      if (backup && !isEncryptedEnvelope(backup.payload)) {\n        const restored = backup.payload as BackupDocument;\n        if (restored.schema === 2 && isWorkspace(restored.workspace)) {\n          const document = activeDocument(restored.workspace);\n          setWorkspace(restored.workspace);\n          saveWorkspaceLocal(restored.workspace);\n          setCV({ ...seed, ...document.cv, projects: document.cv.projects ?? [], customSections: document.cv.customSections ?? [] });\n          setLang(document.settings.lang);\n          setTemplate(document.settings.template);\n          setPhotoOn(document.settings.photoOn);\n          lastAutosavedWorkspaceRef.current = JSON.stringify(restored.workspace);\n        }\n      }\n\n      setCloudStatus("connected");\n    }).catch(() => undefined);\n'''
+if old_restore not in text:
+    raise SystemExit('Could not find restored EC2 session block to hydrate')
+text = text.replace(old_restore, new_restore, 1)
+
 path.write_text(text, encoding='utf-8')
-print('v1.5.7 fix applied: timestamps ignored and startup/session restore cannot create cloud revisions.')
+print('v1.5.7 fix applied: no phantom autosaves; restored EC2 session hydrates the recovered workspace first.')
