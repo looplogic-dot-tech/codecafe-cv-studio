@@ -7,7 +7,7 @@ import "./sync-notice.css";
 import "./professional-library.css";
 import "./library-composer.css";
 import { prepareLinkedWorkspaceFromStorage } from "./libraryLinking";
-import { installPrintEditorV2 } from "./printEditorV2";
+import { installPrintEditorV3 } from "./printEditorV3";
 import { installSyncNotice } from "./syncNotice";
 import { removeAlexRiveraDemoData } from "./startupCleanup";
 
@@ -43,5 +43,5 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 
-installPrintEditorV2();
+installPrintEditorV3();
 installSyncNotice();
