@@ -61,7 +61,23 @@ app = re.sub(
     app,
 )
 
-# 3) Remove the dangerous automatic EC2 revision writer. Previously every state
+# 3) Remember an existing Drive token, but do not automatically apply a Drive
+# backup during startup. EC2 recovery must not race with an older Drive copy and
+# overwrite the rescued library. Explicit Drive authorization still loads Drive.
+drive_startup_pattern = re.compile(
+    r'''    const storedGoogleToken = loadStoredGoogleToken\(\);\n'''
+    r'''    setGoogleToken\(storedGoogleToken\);\n'''
+    r'''    if \(storedGoogleToken\) \{.*?'''
+    r'''    \}\n'''
+    r'''    // La cookie HttpOnly permite reconectar sin volver a pedir la contraseña\.''',
+    re.S,
+)
+drive_startup_replacement = '''    const storedGoogleToken = loadStoredGoogleToken();\n    setGoogleToken(storedGoogleToken);\n    // A remembered Drive authorization is kept available, but Drive data is not\n    // auto-applied here. This prevents it from racing with/restoring over EC2.\n    // La cookie HttpOnly permite reconectar sin volver a pedir la contraseña.'''
+app, drive_startup_count = drive_startup_pattern.subn(drive_startup_replacement, app, count=1)
+if drive_startup_count not in (0, 1):
+    raise SystemExit('Unexpected Drive startup block count')
+
+# 4) Remove the dangerous automatic EC2 revision writer. Previously every state
 # transition (startup, opening a CV, cloud restore, etc.) could create a revision
 # after 1.2 seconds. From now on only the explicit Save -> syncCloud path writes.
 autosave_pattern = re.compile(
@@ -78,12 +94,12 @@ app, autosave_count = autosave_pattern.subn(
 if autosave_count not in (0, 1):
     raise SystemExit('Unexpected automatic-save block count')
 
-# 4) Guardrails: the demo identity must not exist in production startup data.
+# 5) Guardrails: the demo identity must not exist in production startup data.
 if 'name: "Alex Rivera"' in app or 'alex.rivera@example.com' in app:
     raise SystemExit('Demo identity is still present in production source')
 
 app_path.write_text(app, encoding='utf-8')
 
-# Regression tests for the exact failure that damaged the cloud history.
+# Regression tests for the exact failures that damaged the cloud history.
 test = Path('server/test_cloud_recovery_from_stable.py')
-test.write_text('''import pathlib\nimport unittest\n\nROOT = pathlib.Path(__file__).resolve().parents[1]\nAPP = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")\n\nclass StableCloudRecoveryTests(unittest.TestCase):\n    def test_demo_identity_removed(self):\n        self.assertNotIn('name: "Alex Rivera"', APP)\n        self.assertNotIn("alex.rivera@example.com", APP)\n\n    def test_startup_is_blank_and_does_not_reopen_local_workspace(self):\n        self.assertIn("const startupWorkspace = createInitialWorkspace(blankCV", APP)\n        self.assertNotIn("loadWorkspaceLocal(", APP)\n\n    def test_cloud_restore_does_not_merge_stale_local_demo_state(self):\n        self.assertNotIn("mergeWorkspaces(workspaceWithCurrent()", APP)\n        self.assertIn("applyBackup(backup);", APP)\n        self.assertIn("applyBackup(document);", APP)\n\n    def test_only_explicit_save_path_can_write_ec2_revision(self):\n        # There must be exactly one server write call, inside syncCloud().\n        self.assertEqual(APP.count("saveServerBackup("), 1)\n        self.assertNotIn("}, 1200);", APP)\n        self.assertNotIn("crea una revisión EC2 tras una pausa", APP)\n\nif __name__ == "__main__":\n    unittest.main()\n''', encoding='utf-8')
+test.write_text('''import pathlib\nimport unittest\n\nROOT = pathlib.Path(__file__).resolve().parents[1]\nAPP = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")\n\nclass StableCloudRecoveryTests(unittest.TestCase):\n    def test_demo_identity_removed(self):\n        self.assertNotIn('name: "Alex Rivera"', APP)\n        self.assertNotIn("alex.rivera@example.com", APP)\n\n    def test_startup_is_blank_and_does_not_reopen_local_workspace(self):\n        self.assertIn("const startupWorkspace = createInitialWorkspace(blankCV", APP)\n        self.assertNotIn("loadWorkspaceLocal(", APP)\n\n    def test_cloud_restore_does_not_merge_stale_local_demo_state(self):\n        self.assertNotIn("mergeWorkspaces(workspaceWithCurrent()", APP)\n        self.assertIn("applyBackup(backup);", APP)\n        self.assertIn("applyBackup(document);", APP)\n\n    def test_drive_does_not_overwrite_ec2_during_startup(self):\n        self.assertNotIn("loadGoogleBackup<BackupDocument>(storedGoogleToken)", APP)\n        self.assertIn("const backup = await loadGoogleBackup<BackupDocument>(token);", APP)\n\n    def test_only_explicit_save_path_can_write_ec2_revision(self):\n        # There must be exactly one server write call, inside syncCloud().\n        self.assertEqual(APP.count("saveServerBackup("), 1)\n        self.assertNotIn("}, 1200);", APP)\n        self.assertNotIn("crea una revisión EC2 tras una pausa", APP)\n\nif __name__ == "__main__":\n    unittest.main()\n''', encoding='utf-8')
