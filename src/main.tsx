@@ -11,6 +11,8 @@ import "./library-composer.css";
 import { prepareLinkedWorkspaceFromStorage } from "./libraryLinking";
 import { installPrintEditorV3 } from "./printEditorV3";
 import { installSyncNotice } from "./syncNotice";
+import { installMarginGuideFixV153 } from "./margin-guide-fix-v153";
+import { installGoogleDriveAutoLoadV153 } from "./google-drive-autoload-v153";
 import { removeAlexRiveraDemoData } from "./startupCleanup";
 
 function reopenMyCvsAfterRender(): void {
@@ -47,3 +49,5 @@ createRoot(document.getElementById("root")!).render(
 
 installPrintEditorV3();
 installSyncNotice();
+installMarginGuideFixV153();
+installGoogleDriveAutoLoadV153();
