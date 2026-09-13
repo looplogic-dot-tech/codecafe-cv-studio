@@ -28,21 +28,31 @@ class StoreTests(unittest.TestCase):
             "workspace": {"value": value},
         }
 
-    def test_versioning_deduplication_and_retention(self):
+    def test_current_workspace_snapshot_updates_in_place(self):
         first, unchanged = self.store.save(self.payload("one"), "1" * 64, 0)
         self.assertFalse(unchanged)
+
         repeated, unchanged = self.store.save(self.payload("one"), "1" * 64, first["revision"])
         self.assertTrue(unchanged)
         self.assertEqual(first["revision"], repeated["revision"])
-        second, _ = self.store.save(self.payload("two"), "2" * 64, first["revision"])
-        third, _ = self.store.save(self.payload("three"), "3" * 64, second["revision"])
+
+        second, unchanged = self.store.save(self.payload("two"), "2" * 64, first["revision"])
+        self.assertFalse(unchanged)
+        self.assertEqual(first["revision"], second["revision"])
+
+        third, unchanged = self.store.save(self.payload("three"), "3" * 64, second["revision"])
+        self.assertFalse(unchanged)
+        self.assertEqual(first["revision"], third["revision"])
+
         self.assertEqual("three", self.store.latest()["payload"]["workspace"]["value"])
+
+        # EC2 is one current workspace snapshot. Repeated edits must not create
+        # one database row per edit and must not consume a CV slot.
         with self.store.connect() as database:
-            self.assertEqual(2, database.execute("SELECT COUNT(*) FROM backups").fetchone()[0])
-        self.assertGreater(third["revision"], second["revision"])
-        self.assertEqual([third["revision"], second["revision"]], [item["revision"] for item in self.store.revisions()])
-        self.assertEqual("two", self.store.revision(second["revision"])["payload"]["workspace"]["value"])
-        self.assertIsNone(self.store.revision(first["revision"]))
+            self.assertEqual(1, database.execute("SELECT COUNT(*) FROM backups").fetchone()[0])
+
+        self.assertEqual([first["revision"]], [item["revision"] for item in self.store.revisions()])
+        self.assertEqual("three", self.store.revision(first["revision"])["payload"]["workspace"]["value"])
 
     def test_conflict_does_not_overwrite(self):
         first, _ = self.store.save(self.payload("one"), "1" * 64, 0)
