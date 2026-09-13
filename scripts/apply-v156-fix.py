@@ -3,10 +3,27 @@ from pathlib import Path
 
 path = Path('src/App.tsx')
 text = path.read_text(encoding='utf-8')
-old = 'backupDigest(document)'
-new = 'backupDigest(document.schema === 2 ? document.workspace : document)'
-count = text.count(old)
+
+# 1) Revision digest must ignore savedAt timestamps.
+old_digest = 'backupDigest(document)'
+new_digest = 'backupDigest(document.schema === 2 ? document.workspace : document)'
+count = text.count(old_digest)
 if count != 2:
     raise SystemExit(f'Expected exactly 2 digest calls to patch, found {count}')
-path.write_text(text.replace(old, new), encoding='utf-8')
-print('v1.5.6 fix applied: EC2 revision digest ignores savedAt while remaining compatible with legacy backups.')
+text = text.replace(old_digest, new_digest)
+
+# 2) Never autosave merely because the app/session started or reconnected.
+old_ref = '  const ec2SaveQueueRef = useRef<Promise<void>>(Promise.resolve());\n'
+new_ref = old_ref + '  const lastAutosavedWorkspaceRef = useRef<string | null>(null);\n'
+if old_ref not in text:
+    raise SystemExit('Could not find EC2 save queue ref insertion point')
+text = text.replace(old_ref, new_ref, 1)
+
+old_block = '''    saveWorkspaceLocal(updatedWorkspace);\n    localStorage.setItem("codecafe-cv", JSON.stringify(cv));\n    localStorage.setItem("codecafe-cv-settings", JSON.stringify({ lang, template, photoOn }));\n    if (!serverSession && !googleToken) return;\n'''
+new_block = '''    saveWorkspaceLocal(updatedWorkspace);\n    localStorage.setItem("codecafe-cv", JSON.stringify(cv));\n    localStorage.setItem("codecafe-cv-settings", JSON.stringify({ lang, template, photoOn }));\n\n    // Establish a baseline without creating a cloud revision. Session restore,\n    // page reload and reconnects must never be treated as user edits.\n    const workspaceSignature = JSON.stringify(updatedWorkspace);\n    if (lastAutosavedWorkspaceRef.current === null) {\n      lastAutosavedWorkspaceRef.current = workspaceSignature;\n      return;\n    }\n    if (lastAutosavedWorkspaceRef.current === workspaceSignature) return;\n    lastAutosavedWorkspaceRef.current = workspaceSignature;\n\n    if (!serverSession && !googleToken) return;\n'''
+if old_block not in text:
+    raise SystemExit('Could not find autosave block to protect')
+text = text.replace(old_block, new_block, 1)
+
+path.write_text(text, encoding='utf-8')
+print('v1.5.7 fix applied: timestamps ignored and startup/session restore cannot create cloud revisions.')
