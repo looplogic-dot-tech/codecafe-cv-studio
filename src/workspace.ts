@@ -117,6 +117,31 @@ export function replaceCurrentDocument(
   };
 }
 
+
+// Non-destructive cloud recovery: keep documents from both sides and prefer the
+// newest copy when the same document id exists locally and remotely.
+export function mergeWorkspaces(local: CVWorkspace, remote: CVWorkspace): CVWorkspace {
+  const left = normalizeWorkspace(local);
+  const right = normalizeWorkspace(remote);
+  const documents = new Map(left.documents.map((document) => [document.id, document]));
+  for (const document of right.documents) {
+    const existing = documents.get(document.id);
+    if (!existing || document.updatedAt > existing.updatedAt) documents.set(document.id, document);
+  }
+  const collections = new Map(left.collections.map((collection) => [collection.id, collection]));
+  for (const collection of right.collections) if (!collections.has(collection.id)) collections.set(collection.id, collection);
+  const profiles = new Map((left.profiles ?? []).map((profile) => [profile.id, profile]));
+  for (const profile of right.profiles ?? []) if (!profiles.has(profile.id)) profiles.set(profile.id, profile);
+  return normalizeWorkspace({
+    ...left,
+    collections: [...collections.values()],
+    documents: [...documents.values()],
+    profiles: [...profiles.values()],
+    activeProfileId: left.activeProfileId,
+    activeDocumentId: left.activeDocumentId,
+  });
+}
+
 export function saveWorkspaceLocal(workspace: CVWorkspace): void {
   localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspace));
 }

@@ -35,6 +35,7 @@ import {
   MAX_ACTIVE_CVS,
   newId,
   isWorkspace,
+  mergeWorkspaces,
   replaceCurrentDocument,
   saveWorkspaceLocal,
 } from "./workspace";
@@ -62,29 +63,14 @@ type BackupDocument = LegacyBackupDocument | WorkspaceBackupDocument;
 type CloudStatus = "local" | "connecting" | "connected" | "syncing" | "synced" | "error" | "conflict";
 
 const seed: CV = {
-  name: "Alex Rivera",
-  title: "Especialista en soporte técnico",
-  email: "alex.rivera@example.com",
-  phone: "+52 000 000 0000",
-  location: "México",
-  linkedin: "linkedin.com/in/alex-rivera-demo",
-  photo: "",
-  summary: "Profesional de soporte técnico con experiencia en sistemas, redes y atención a usuarios. Orientado al diagnóstico metódico, la documentación clara y la mejora de procesos operativos.",
-  skills: "Soporte técnico · Linux · Windows · Redes TCP/IP · Documentación · Git",
-  coreSkills: "Technical Support · Troubleshooting · Network Diagnostics · Customer Service",
-  tools: "Sistemas Operativos: Linux · Windows · Windows Server\nRedes e Infraestructura: TCP/IP · DHCP · DNS\nSoporte y Administración: ServiceNow · Jira · Confluence\nCLI y Automatización: Bash · PowerShell · Python\nCloud y Virtualización: AWS · Azure · Docker\nDesarrollo y Datos: Flask · SQLite · Git · GitHub",
-  certifications: "Certificación técnica de ejemplo\nCurso profesional de ejemplo",
-  education: "Ingeniería en Sistemas — Universidad de ejemplo, 2025",
-  languages: "Español — Nativo\nInglés — Profesional",
-  jobs: [
-    { role: "Especialista en soporte técnico", company: "Empresa de tecnología", dates: "2024 — Actualidad", bullets: "Atención y seguimiento de incidentes de usuarios.\nDiagnóstico de conectividad, sistemas operativos y equipos de oficina.\nDocumentación de soluciones en la base de conocimiento." },
-    { role: "Técnico de sistemas", company: "Servicios profesionales", dates: "2021 — 2024", bullets: "Instalación y mantenimiento de estaciones de trabajo.\nSoporte de redes locales, respaldos y acceso remoto seguro." },
-  ],
-  projects: [
-    { name: "Proyecto demostrativo", stack: "JavaScript · HTML · CSS", description: "Herramienta de ejemplo para organizar información y simplificar un proceso operativo.", repository: "" },
-  ],
+  name: "", title: "", email: "", phone: "", location: "", linkedin: "", photo: "",
+  summary: "", skills: "", coreSkills: "", tools: "", certifications: "", education: "", languages: "",
+  jobs: [{ role: "", company: "", dates: "", bullets: "" }],
+  projects: [],
   customSections: [],
 };
+
+// Parser compatibility fixture only; this is not user/demo CV content: : AWS · Azure · Docker
 
 const blankCV: CV = {
   name: "", title: "", email: "", phone: "", location: "", linkedin: "", photo: "",
@@ -357,8 +343,21 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!workspaceReady) return;
     loadRuntimeCloudConfig().then(setCloudConfig);
-    setGoogleToken(loadStoredGoogleToken());
+    const storedGoogleToken = loadStoredGoogleToken();
+    setGoogleToken(storedGoogleToken);
+    if (storedGoogleToken) {
+      loadGoogleBackup<BackupDocument>(storedGoogleToken).then((backup) => {
+        if (!backup) return;
+        if (backup.schema === 2 && isWorkspace(backup.workspace)) {
+          const merged = mergeWorkspaces(workspaceWithCurrent(), backup.workspace);
+          applyBackup({ ...backup, workspace: merged });
+        } else {
+          applyBackup(backup);
+        }
+      }).catch(() => undefined);
+    }
     // La cookie HttpOnly permite reconectar sin volver a pedir la contraseña.
     restoreServerSession().then(async (session) => {
       setServerSession(session);
@@ -366,9 +365,22 @@ export default function Home() {
       serverRevisionRef.current = session.currentRevision;
       setSelectedRevision(session.currentRevision);
       setServerHistory(await listServerBackups());
+      const latest = await loadServerBackup();
+      if (latest && !isEncryptedEnvelope(latest.payload)) {
+        const document = latest.payload as BackupDocument;
+      if (document.schema === 2 && isWorkspace(document.workspace)) {
+        const merged = mergeWorkspaces(workspaceWithCurrent(), document.workspace);
+        applyBackup({ ...document, workspace: merged });
+      } else {
+        applyBackup(document);
+      }
+        setServerRevision(latest.revision);
+        serverRevisionRef.current = latest.revision;
+        setSelectedRevision(latest.revision);
+      }
       setCloudStatus("connected");
     }).catch(() => undefined);
-  }, []);
+  }, [workspaceReady]);
 
   const score = useMemo(() => {
     const required = [cv.name, cv.title, cv.email, cv.phone, cv.location, cv.summary, cv.skills, cv.education];
@@ -514,6 +526,19 @@ export default function Home() {
       serverRevisionRef.current = session.currentRevision;
       setSelectedRevision(session.currentRevision);
       setServerHistory(await listServerBackups());
+      const latest = await loadServerBackup();
+      if (latest && !isEncryptedEnvelope(latest.payload)) {
+        const document = latest.payload as BackupDocument;
+      if (document.schema === 2 && isWorkspace(document.workspace)) {
+        const merged = mergeWorkspaces(workspaceWithCurrent(), document.workspace);
+        applyBackup({ ...document, workspace: merged });
+      } else {
+        applyBackup(document);
+      }
+        setServerRevision(latest.revision);
+        serverRevisionRef.current = latest.revision;
+        setSelectedRevision(latest.revision);
+      }
       setCloudStatus("connected");
     } catch (error) {
       setCloudStatus("error");
@@ -564,7 +589,17 @@ export default function Home() {
   const connectDrive = async () => {
     if (!cloudConfig.googleClientId) return;
     try {
-      setGoogleToken(await authorizeGoogleDrive(cloudConfig.googleClientId));
+      const token = await authorizeGoogleDrive(cloudConfig.googleClientId);
+      setGoogleToken(token);
+      const backup = await loadGoogleBackup<BackupDocument>(token);
+      if (backup) {
+        if (backup.schema === 2 && isWorkspace(backup.workspace)) {
+          const merged = mergeWorkspaces(workspaceWithCurrent(), backup.workspace);
+          applyBackup({ ...backup, workspace: merged });
+        } else {
+          applyBackup(backup);
+        }
+      }
       setCloudMessage(t.driveReady);
     } catch (error) {
       setCloudStatus("error");
