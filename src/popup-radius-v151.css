@@ -1,0 +1,40 @@
+/* v1.5.1: squarer popup surfaces while keeping a small rounded edge. */
+:root{
+  --codecafe-popup-radius:8px;
+  --codecafe-control-radius:7px;
+}
+
+.printEditorDialogV2,
+[role="dialog"],
+[class*="Dialog"],
+[class*="dialog"],
+[class*="Modal"],
+[class*="modal"],
+[class*="Popup"],
+[class*="popup"],
+.syncNoticePanel,
+.syncNoticeCard,
+.libraryComposerDialog,
+.libraryComposerPanel,
+.professionalLibraryDialog,
+.professionalLibraryPanel{
+  border-radius:var(--codecafe-popup-radius)!important;
+}
+
+.printEditorPreviewColumnV2{
+  border-top-left-radius:var(--codecafe-popup-radius)!important;
+  border-bottom-left-radius:var(--codecafe-popup-radius)!important;
+}
+.printEditorControls{
+  border-top-right-radius:var(--codecafe-popup-radius)!important;
+  border-bottom-right-radius:var(--codecafe-popup-radius)!important;
+}
+
+.printEditorPresetRowV2 button,
+.printEditorActionsV2 button,
+.printEditorBreakModeV2,
+.printEditorTextButtonV2,
+.printEditorCompactRowV2 select,
+.printEditorNumberField>div{
+  border-radius:var(--codecafe-control-radius)!important;
+}
