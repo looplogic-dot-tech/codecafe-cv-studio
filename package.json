@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "python3 scripts/apply-v158-stability.py && python3 scripts/apply-v158b-migration.py && python3 scripts/apply-v159-storage-policy.py",
+    "prebuild": "python3 scripts/apply-v158-stability.py && python3 scripts/apply-v158b-migration.py && python3 scripts/apply-v159-storage-policy.py && python3 scripts/apply-v159-server-policy.py",
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
