@@ -11,7 +11,6 @@ import "./library-composer.css";
 import { prepareLinkedWorkspaceFromStorage } from "./libraryLinking";
 import { installPrintEditorV3 } from "./printEditorV3";
 import { installSyncNotice } from "./syncNotice";
-import { installGoogleAuthCompat } from "./google-auth-compat";
 import { removeAlexRiveraDemoData } from "./startupCleanup";
 
 function reopenMyCvsAfterRender(): void {
@@ -37,7 +36,6 @@ function RootApp() {
   return <App key={revision} />;
 }
 
-installGoogleAuthCompat();
 removeAlexRiveraDemoData();
 prepareLinkedWorkspaceFromStorage();
 
