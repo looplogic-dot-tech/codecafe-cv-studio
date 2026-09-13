@@ -47,3 +47,5 @@ jobs:
           git commit -m "Apply requested cloud recovery fixes to stable e4d09fe"
           git pull --rebase origin fix/cloud-recovery-from-e4d09fe
           git push origin HEAD:fix/cloud-recovery-from-e4d09fe
+
+# This workflow exists only on the isolated branch created from e4d09fe.
