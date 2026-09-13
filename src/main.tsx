@@ -2,14 +2,14 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./styles.css";
-import "./print-preview.css";
+import "./print-editor-v2.css";
 import "./sync-notice.css";
 import "./professional-library.css";
 import "./library-composer.css";
 import { prepareLinkedWorkspaceFromStorage } from "./libraryLinking";
-import { installPrintPreview } from "./printPreview";
-import { installPrintSettingsSync } from "./printSettingsSync";
+import { installPrintEditorV2 } from "./printEditorV2";
 import { installSyncNotice } from "./syncNotice";
+import { removeAlexRiveraDemoData } from "./startupCleanup";
 
 function reopenMyCvsAfterRender(): void {
   window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
@@ -34,6 +34,7 @@ function RootApp() {
   return <App key={revision} />;
 }
 
+removeAlexRiveraDemoData();
 prepareLinkedWorkspaceFromStorage();
 
 createRoot(document.getElementById("root")!).render(
@@ -42,6 +43,5 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 
-installPrintSettingsSync();
-installPrintPreview();
+installPrintEditorV2();
 installSyncNotice();
