@@ -11,7 +11,6 @@ import "./library-composer.css";
 import { prepareLinkedWorkspaceFromStorage } from "./libraryLinking";
 import { installPrintEditorV3 } from "./printEditorV3";
 import { installSyncNotice } from "./syncNotice";
-import { installMarginGuideFixV153 } from "./margin-guide-fix-v153";
 import { installGoogleDriveAutoLoadV153 } from "./google-drive-autoload-v153";
 import { installEc2DriveMigrationV154 } from "./ec2-drive-migration-v154";
 import { installDisconnectControlsV155 } from "./disconnect-controls-v155";
@@ -26,18 +25,18 @@ function reopenMyCvsAfterRender(): void {
 }
 
 function RootApp() {
-  const [revision, setRevision] = useState(0);
+  const [generation, setGeneration] = useState(0);
   useEffect(() => {
     const reload = (event: Event) => {
       const detail = (event as CustomEvent<{ reason?: string }>).detail;
       prepareLinkedWorkspaceFromStorage();
-      setRevision((value) => value + 1);
+      setGeneration((value) => value + 1);
       if (detail?.reason === "cv-removed") reopenMyCvsAfterRender();
     };
     window.addEventListener("codecafe-workspace-reload", reload);
     return () => window.removeEventListener("codecafe-workspace-reload", reload);
   }, []);
-  return <App key={revision} />;
+  return <App key={generation} />;
 }
 
 removeAlexRiveraDemoData();
@@ -51,7 +50,6 @@ createRoot(document.getElementById("root")!).render(
 
 installPrintEditorV3();
 installSyncNotice();
-installMarginGuideFixV153();
 installGoogleDriveAutoLoadV153();
 installEc2DriveMigrationV154();
 installDisconnectControlsV155();
