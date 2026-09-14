@@ -1,32 +1,49 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 
 path = Path('src/App.tsx')
 text = path.read_text(encoding='utf-8')
 
 flag = 'codecafe-ec2-explicitly-disconnected'
 
-# If the user explicitly disconnected EC2, do not silently restore the HttpOnly-cookie session on reload.
-old = '''  useEffect(() => {\n    loadRuntimeCloudConfig().then(setCloudConfig);\n    setGoogleToken(loadStoredGoogleToken());\n    // La cookie HttpOnly permite reconectar sin volver a pedir la contraseña.\n    restoreServerSession().then(async (session) => {\n      setServerSession(session);\n      setServerRevision(session.currentRevision);\n      serverRevisionRef.current = session.currentRevision;\n      setSelectedRevision(session.currentRevision);\n      setServerHistory(await listServerBackups());\n      setCloudStatus("connected");\n    }).catch(() => undefined);\n  }, []);\n'''
-new = f'''  useEffect(() => {{\n    loadRuntimeCloudConfig().then(setCloudConfig);\n    setGoogleToken(loadStoredGoogleToken());\n    // Explicit disconnect wins over any surviving HttpOnly cookie.\n    if (localStorage.getItem("{flag}") === "true") return;\n    restoreServerSession().then(async (session) => {{\n      setServerSession(session);\n      setServerRevision(session.currentRevision);\n      serverRevisionRef.current = session.currentRevision;\n      setSelectedRevision(session.currentRevision);\n      setServerHistory(await listServerBackups());\n      setCloudStatus("connected");\n    }}).catch(() => undefined);\n  }}, []);\n'''
-if old not in text:
-    raise SystemExit('explicit disconnect patch: restoreServerSession block not found')
-text = text.replace(old, new, 1)
+# After the storage-UI cleanup, the restore block no longer contains the old
+# revision/history state updates. Patch only the stable beginning of the effect
+# so this remains compatible with both the old and cleaned-up App.tsx.
+needle = '''  useEffect(() => {\n    loadRuntimeCloudConfig().then(setCloudConfig);\n    setGoogleToken(loadStoredGoogleToken());\n'''
+replacement = f'''  useEffect(() => {{\n    loadRuntimeCloudConfig().then(setCloudConfig);\n    setGoogleToken(loadStoredGoogleToken());\n    // Explicit disconnect wins over any surviving HttpOnly cookie.\n    if (localStorage.getItem("{flag}") === "true") return;\n'''
+
+if f'localStorage.getItem("{flag}") === "true"' not in text:
+    if needle not in text:
+        raise SystemExit('explicit disconnect patch: startup cloud effect not found')
+    text = text.replace(needle, replacement, 1)
 
 # A successful manual connection clears the explicit-disconnect preference.
-old = '''      const session = await connectServer(syncPassword);\n      setServerSession(session);\n'''
-new = f'''      const session = await connectServer(syncPassword);\n      localStorage.removeItem("{flag}");\n      setServerSession(session);\n'''
-if old not in text:
-    raise SystemExit('explicit disconnect patch: connectServer block not found')
-text = text.replace(old, new, 1)
+connect_pattern = re.compile(
+    r'(\s*const session = await connectServer\(syncPassword\);\n)(\s*setServerSession\(session\);)'
+)
+if f'localStorage.removeItem("{flag}")' not in text:
+    match = connect_pattern.search(text)
+    if not match:
+        raise SystemExit('explicit disconnect patch: connectServer block not found')
+    indent = re.match(r'\s*', match.group(2)).group(0)
+    text = connect_pattern.sub(
+        lambda m: m.group(1) + indent + f'localStorage.removeItem("{flag}");\n' + m.group(2),
+        text,
+        count=1,
+    )
 
-# Record user intent before attempting the server DELETE. Even if cookie invalidation fails,
-# a reload must remain disconnected until the user explicitly reconnects.
-old = '''  const disconnectEc2 = async () => {\n    if (serverSession) await disconnectServer(serverSession.csrfToken).catch(() => undefined);\n    setServerSession(null);\n'''
-new = f'''  const disconnectEc2 = async () => {{\n    localStorage.setItem("{flag}", "true");\n    if (serverSession) await disconnectServer(serverSession.csrfToken).catch(() => undefined);\n    setServerSession(null);\n'''
-if old not in text:
-    raise SystemExit('explicit disconnect patch: disconnectEc2 block not found')
-text = text.replace(old, new, 1)
+# Record user intent before attempting server-side logout. Even if cookie
+# invalidation fails, reload must remain disconnected until a manual reconnect.
+if f'localStorage.setItem("{flag}", "true")' not in text:
+    marker = '  const disconnectEc2 = async () => {\n'
+    if marker not in text:
+        raise SystemExit('explicit disconnect patch: disconnectEc2 block not found')
+    text = text.replace(
+        marker,
+        marker + f'    localStorage.setItem("{flag}", "true");\n',
+        1,
+    )
 
 path.write_text(text, encoding='utf-8')
 print('v1.6.1 explicit disconnect applied: EC2 stays disconnected across reload until user reconnects.')
