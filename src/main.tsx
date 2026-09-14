@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./styles.css";
 import "./print-editor-v2.css";
-import "./print-editor-v15.css";
 import "./popup-radius-v151.css";
 import "./sync-notice.css";
 import "./professional-library.css";
