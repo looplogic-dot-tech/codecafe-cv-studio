@@ -7,8 +7,10 @@ import "./popup-radius-v151.css";
 import "./sync-notice.css";
 import "./professional-library.css";
 import "./library-composer.css";
+import "./live-preview-pages.css";
 import { prepareLinkedWorkspaceFromStorage } from "./libraryLinking";
 import { installPrintEditorV3 } from "./printEditorV3";
+import { installLivePreviewPages } from "./livePreviewPages";
 import { installSyncNotice } from "./syncNotice";
 import { installGoogleDriveAutoLoadV153 } from "./google-drive-autoload-v153";
 import { installEc2DriveMigrationV154 } from "./ec2-drive-migration-v154";
@@ -48,6 +50,7 @@ createRoot(document.getElementById("root")!).render(
 );
 
 installPrintEditorV3();
+installLivePreviewPages();
 installSyncNotice();
 installGoogleDriveAutoLoadV153();
 installEc2DriveMigrationV154();
