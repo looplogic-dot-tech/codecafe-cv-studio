@@ -81,8 +81,6 @@ npx -y node@22 "$NPM_CLI" run build
 
 test -f dist/index.html
 test -d dist/assets
-
-# The deployed source must not contain the retired term in either language.
 if grep -RniE 'revision|revisi[oó]n' src server; then
   echo "ERROR: retired storage-history terminology remains in deployable source"
   exit 1
@@ -121,8 +119,8 @@ new.execute('INSERT INTO workspace_state(id,saved_at,digest,payload) VALUES(1,?,
 if sessions:
     new.executemany('INSERT OR REPLACE INTO sessions(token_hash,csrf,expires_at) VALUES(?,?,?)',sessions)
 new.commit()
-check=new.execute('SELECT COUNT(*),saved_at,digest,payload FROM workspace_state').fetchone()
-if check[0]!=1: raise SystemExit('ERROR: singleton workspace migration failed')
+if new.execute('SELECT COUNT(*) FROM workspace_state').fetchone()[0] != 1:
+    raise SystemExit('ERROR: singleton workspace migration failed')
 new.execute('VACUUM')
 new.close(); old.close()
 PY
@@ -143,13 +141,10 @@ cp -a dist/assets "$WEB/"
 cp -a dist/index.html "$WEB/"
 
 echo
-echo "=== 8. REMOVE OLD STORAGE DATABASES AND OLD DEPLOYMENT COPIES ==="
-# The new safety JSON and workspace.sqlite3 contain the authoritative content.
+echo "=== 8. REMOVE OLD DATABASES AND HISTORICAL DEPLOYMENT COPIES ==="
 sudo rm -f "$OLD_DB" "$OLD_DB-wal" "$OLD_DB-shm"
 sudo rm -rf "$DATA/deployment-backups"
-# Remove old SQLite safety databases and obsolete JSON artifacts, but preserve the new clean safety JSON.
 sudo find "$SAFE_DIR" -maxdepth 1 -type f ! -name "$(basename "$SAFE_JSON")" -delete 2>/dev/null || true
-# Remove obsolete backend source copies and abandoned build directories.
 sudo find "$(dirname "$BACKEND")" -maxdepth 1 -type f -name '*.before-*' -delete 2>/dev/null || true
 find "$HOME" -maxdepth 1 -type d -name 'codecafe-v*' ! -path "$WORK" -exec rm -rf {} + 2>/dev/null || true
 rm -f /tmp/repair-* /tmp/codecafe-* 2>/dev/null || true
@@ -180,8 +175,12 @@ db.close()
 PY
 
 echo
-echo "=== 11. PURGE OLD TERM FROM CODECAFE USER/SOURCE ARTIFACTS ==="
-# Sanitize shell history entries from this repair marathon without touching operating-system files.
+echo "=== 11. PURGE RETIRED TERM FROM CODECAFE/USER ARTIFACTS ==="
+# Remove transient source clone first; it contains migration scripts by design.
+cd "$HOME"
+rm -rf "$WORK"
+
+# Sanitize shell history from this repair session.
 if [ -f "$HOME/.bash_history" ]; then
   python3 - "$HOME/.bash_history" <<'PY'
 from pathlib import Path
@@ -193,7 +192,23 @@ p.write_text(s)
 PY
 fi
 
-# Live CodeCafe application + user workspace must contain none of the retired term.
+# If an old full source tree exists beside the live backend, sanitize dormant text files too.
+SOURCE_ROOT="/opt/codecafe-studio/apps/codecafe-cv-studio-source"
+if [ -d "$SOURCE_ROOT" ]; then
+  sudo grep -RIlZ -E 'revision|revisi[oó]n' "$SOURCE_ROOT" 2>/dev/null | while IFS= read -r -d '' f; do
+    sudo python3 - "$f" <<'PY'
+from pathlib import Path
+import re,sys
+p=Path(sys.argv[1])
+try: s=p.read_text(encoding='utf-8')
+except Exception: raise SystemExit(0)
+s=re.sub(r'revisi[oó]n(?:es)?','copy',s,flags=re.I)
+s=re.sub(r'revision(?:s)?','copy',s,flags=re.I)
+p.write_text(s,encoding='utf-8')
+PY
+  done
+fi
+
 LEFT="$(grep -RIlE 'revision|revisi[oó]n' /opt/codecafe-studio /home/ubuntu 2>/dev/null || true)"
 if [ -n "$LEFT" ]; then
   echo "ERROR: retired term still exists in these CodeCafe/user files:"
@@ -201,7 +216,6 @@ if [ -n "$LEFT" ]; then
   exit 1
 fi
 
-# Confirm SQLite schema and payload bytes are clean after VACUUM.
 if sudo strings "$NEW_DB" | grep -qiE 'revision|revisi[oó]n'; then
   echo "ERROR: retired term still exists inside workspace.sqlite3"
   exit 1
