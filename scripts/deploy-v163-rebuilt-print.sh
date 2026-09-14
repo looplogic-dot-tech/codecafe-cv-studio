@@ -38,6 +38,19 @@ rm -rf "$WORK"
 git clone --depth 1 --branch "$BRANCH" "$REPO" "$WORK"
 cd "$WORK"
 
+# The rebuilt print editor is now the only print/PDF entry point.
+# Remove the old direct window.print button from the top bar so the UI is not redundant.
+python3 - <<'PY'
+from pathlib import Path
+p=Path('src/App.tsx')
+s=p.read_text(encoding='utf-8')
+old='          <button className="primary" onClick={() => window.print()}>{t.pdf}</button>\n'
+if old not in s:
+    raise SystemExit('ERROR: legacy direct PDF button not found; refusing ambiguous UI edit')
+s=s.replace(old,'',1)
+p.write_text(s,encoding='utf-8')
+PY
+
 echo "Building clean 1.6.3 frontend without historical prebuild mutation scripts..."
 NPM_CLI="$(readlink -f "$(command -v npm)")"
 npx -y node@22 "$NPM_CLI" ci
@@ -48,6 +61,7 @@ test -f dist/index.html
 test -d dist/assets
 grep -q 'printEditorContentViewport' src/printEditorV3.ts
 ! grep -q 'installMarginGuideFixV153' src/main.tsx
+! grep -q '<button className="primary" onClick={() => window.print()}>{t.pdf}</button>' src/App.tsx
 
 mkdir -p "$ROLLBACK"
 cp -a "$WEB/index.html" "$ROLLBACK/" 2>/dev/null || true
@@ -75,5 +89,7 @@ echo "✓ legacy margin interceptor removed"
 echo "✓ preview uses fixed physical pages"
 echo "✓ margins define a clipped content viewport on every page"
 echo "✓ print output uses the same four margins"
+echo "✓ redundant direct PDF button removed"
+echo "✓ Print / PDF editor is the only print entry point"
 echo "✓ workspace unchanged: $AFTER"
 echo "============================================================"
