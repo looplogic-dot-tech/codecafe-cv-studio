@@ -5,9 +5,12 @@ app = Path('src/App.tsx')
 text = app.read_text(encoding='utf-8')
 
 # Storage is presented as loadable content, not as revision history.
-text = text.replace(',\n  listServerBackups,', '')
-text = text.replace(',\n  loadServerBackupRevision,', '')
-text = text.replace(',\n  ServerBackupRevision,', '')
+# Remove complete import lines. Do NOT remove the comma belonging to the
+# preceding import; doing so produces invalid TypeScript such as
+# `loadStoredGoogleToken,\n  loadRuntimeCloudConfig` without a separator.
+text = text.replace('  listServerBackups,\n', '')
+text = text.replace('  loadServerBackupRevision,\n', '')
+text = text.replace('  ServerBackupRevision,\n', '')
 text = text.replace('  const [serverHistory, setServerHistory] = useState<ServerBackupRevision[]>([]);\n', '')
 text = text.replace('  const [selectedRevision, setSelectedRevision] = useState(0);\n', '')
 text = text.replace('      setSelectedRevision(session.currentRevision);\n      setServerHistory(await listServerBackups());\n', '')
