@@ -38,16 +38,25 @@ rm -rf "$WORK"
 git clone --depth 1 --branch "$BRANCH" "$REPO" "$WORK"
 cd "$WORK"
 
-# The rebuilt print editor is now the only print/PDF entry point.
-# Remove the old direct window.print button from the top bar so the UI is not redundant.
+# The rebuilt print editor is the only print/PDF entry point.
+# Remove the old direct window.print button from the top bar.
 python3 - <<'PY'
 from pathlib import Path
 p=Path('src/App.tsx')
 s=p.read_text(encoding='utf-8')
 old='          <button className="primary" onClick={() => window.print()}>{t.pdf}</button>\n'
-if old not in s:
-    raise SystemExit('ERROR: legacy direct PDF button not found; refusing ambiguous UI edit')
-s=s.replace(old,'',1)
+if old in s:
+    s=s.replace(old,'',1)
+p.write_text(s,encoding='utf-8')
+
+# Put the WORKING editor launcher exactly where the old blue PDF button lived:
+# at the far right of .topActions, styled with the existing blue .primary class.
+p=Path('src/printEditorV3.ts')
+s=p.read_text(encoding='utf-8')
+s=s.replace('const anchor = document.querySelector<HTMLElement>(".previewTop");',
+            'const anchor = document.querySelector<HTMLElement>(".topActions");')
+s=s.replace('button.className = "zoom printEditorLauncherV2";',
+            'button.className = "primary printEditorLauncherV2";')
 p.write_text(s,encoding='utf-8')
 PY
 
@@ -62,6 +71,8 @@ test -d dist/assets
 grep -q 'printEditorContentViewport' src/printEditorV3.ts
 ! grep -q 'installMarginGuideFixV153' src/main.tsx
 ! grep -q '<button className="primary" onClick={() => window.print()}>{t.pdf}</button>' src/App.tsx
+grep -q 'document.querySelector<HTMLElement>(".topActions")' src/printEditorV3.ts
+grep -q 'button.className = "primary printEditorLauncherV2"' src/printEditorV3.ts
 
 mkdir -p "$ROLLBACK"
 cp -a "$WEB/index.html" "$ROLLBACK/" 2>/dev/null || true
@@ -84,12 +95,10 @@ rm -rf "$ROLLBACK"
 
 echo "============================================================"
 echo "CODECAFE CV STUDIO 1.6.3 DEPLOYED"
-echo "✓ print editor rebuilt from scratch"
-echo "✓ legacy margin interceptor removed"
-echo "✓ preview uses fixed physical pages"
-echo "✓ margins define a clipped content viewport on every page"
-echo "✓ print output uses the same four margins"
+echo "✓ working print editor preserved"
+echo "✓ margin behavior preserved"
 echo "✓ redundant direct PDF button removed"
-echo "✓ Print / PDF editor is the only print entry point"
+echo "✓ Print / PDF editor button moved to old top-right position"
+echo "✓ Print / PDF editor button uses blue primary style"
 echo "✓ workspace unchanged: $AFTER"
 echo "============================================================"
