@@ -51,71 +51,73 @@ import re
 app = Path('src/App.tsx')
 s = app.read_text(encoding='utf-8')
 
-# Remove legacy direct PDF button.
+# Remove the legacy direct PDF button.
 s = s.replace('          <button className="primary" onClick={() => window.print()}>{t.pdf}</button>\n', '', 1)
 
-# Fresh app/browser sessions must not restore EC2 automatically.
+# Fresh app/browser sessions must never restore EC2 automatically.
 s = re.sub(r'^\s*restoreServerSession,\n', '', s, flags=re.M)
-pattern = re.compile(
-    r'\n\s*//[^\n]*cookie[^\n]*\n\s*restoreServerSession\(\)\.then\(async \(session\) => \{.*?\}\)\.catch\(\(\) => undefined\);',
-    re.S | re.I,
+s = re.sub(
+    r'\n\s*(?://[^\n]*cookie[^\n]*\n\s*)?restoreServerSession\(\)\.then\(async \(session\) => \{.*?\}\)\.catch\(\(\) => undefined\);',
+    '', s, count=1, flags=re.S | re.I,
 )
-s, count = pattern.subn('', s, count=1)
-if count == 0:
-    pattern2 = re.compile(
-        r'\n\s*restoreServerSession\(\)\.then\(async \(session\) => \{.*?\}\)\.catch\(\(\) => undefined\);',
-        re.S,
-    )
-    s = pattern2.sub('', s, count=1)
 
-# Remove obsolete history wording if any survived.
+# Remove obsolete storage-history wording if any survived.
 s = re.sub(r'\s*history:\s*"[^"]*",\s*loadCopy:\s*"[^"]*",?\n?', '\n', s)
 s = re.sub(r'\s*history:\s*"[^"]*",\s*loadRevision:\s*"[^"]*",?\n?', '\n', s)
 
-# Add the Google Drive local disconnect helper to imports.
+# Drive disconnect helper import.
 if 'disconnectGoogleDriveLocal,' not in s:
     s = s.replace('  disconnectServer,\n', '  disconnectServer,\n  disconnectGoogleDriveLocal,\n', 1)
 
-# Add a Drive-specific button label in both languages.
-s = s.replace('loadDrive: "Cargar desde Drive",', 'loadDrive: "Cargar desde Drive", disconnectDrive: "Desconectar Drive",', 1)
-s = s.replace('loadDrive: "Load from Drive",', 'loadDrive: "Load from Drive", disconnectDrive: "Disconnect Drive",', 1)
+# One label used by the SAME connect/disconnect button slot.
+if 'disconnectDrive:' not in s:
+    s = s.replace('loadDrive: "Cargar desde Drive",', 'loadDrive: "Cargar desde Drive", disconnectDrive: "Desconectar Drive",', 1)
+    s = s.replace('loadDrive: "Load from Drive",', 'loadDrive: "Load from Drive", disconnectDrive: "Disconnect Drive",', 1)
 
-# Successful Drive connection must clear an old pink/error state.
-needle = '''      setCloudMessage(t.driveReady);\n    } catch (error) {'''
-replacement = '''      setCloudStatus(serverSession ? "connected" : "synced");\n      setCloudMessage(t.driveReady);\n    } catch (error) {'''
-if needle in s:
-    s = s.replace(needle, replacement, 1)
-
-# Add explicit Drive disconnect behavior.
-marker = '  const openLibrary = async () => {\n'
+# Disconnect Drive only from this browser/app. Existing Drive files remain untouched.
 if 'const disconnectDrive = () =>' not in s:
-    disconnect_fn = '''  const disconnectDrive = () => {\n    disconnectGoogleDriveLocal();\n    setGoogleToken("");\n    setCloudMessage("");\n    setCloudStatus(serverSession ? "connected" : "local");\n  };\n'''
+    marker = '  const openLibrary = async () => {\n'
+    fn = '''  const disconnectDrive = () => {\n    disconnectGoogleDriveLocal();\n    setGoogleToken("");\n    setCloudMessage("");\n    setCloudStatus(serverSession ? "connected" : "local");\n  };\n'''
     if marker not in s:
-        raise SystemExit('ERROR: openLibrary marker not found for Drive disconnect insertion')
-    s = s.replace(marker, disconnect_fn + marker, 1)
+        raise SystemExit('ERROR: openLibrary marker not found')
+    s = s.replace(marker, fn + marker, 1)
 
-# A successful Load from Drive must not remain styled as an error.
-restore_old = '''      applyBackup(backup);\n    } catch (error) {'''
-restore_new = '''      applyBackup(backup);\n      setCloudStatus(serverSession ? "connected" : "synced");\n      setCloudMessage(t.cloudLoaded);\n    } catch (error) {'''
-# Replace the occurrence inside restoreDrive only.
+# Successful Drive connect/load must clear stale error styling.
+connect_pos = s.find('  const connectDrive = async () => {')
+if connect_pos != -1:
+    end = s.find('  const ', connect_pos + 10)
+    block = s[connect_pos:end if end != -1 else len(s)]
+    block = block.replace('      setCloudMessage(t.driveReady);', '      setCloudStatus(serverSession ? "connected" : "synced");\n      setCloudMessage(t.driveReady);', 1)
+    s = s[:connect_pos] + block + s[end if end != -1 else len(s):]
+
 restore_pos = s.find('  const restoreDrive = async () => {')
 if restore_pos != -1:
-    tail = s[restore_pos:]
-    if restore_old in tail:
-        tail = tail.replace(restore_old, restore_new, 1)
-        s = s[:restore_pos] + tail
+    end = s.find('  const ', restore_pos + 10)
+    block = s[restore_pos:end if end != -1 else len(s)]
+    if 'setCloudStatus(serverSession ? "connected" : "synced");' not in block:
+        block = block.replace('      applyBackup(backup);', '      applyBackup(backup);\n      setCloudStatus(serverSession ? "connected" : "synced");\n      setCloudMessage(t.cloudLoaded);', 1)
+    s = s[:restore_pos] + block + s[end if end != -1 else len(s):]
 
-# When Drive is connected, show BOTH Load and Disconnect buttons.
-old_ui = '''{googleToken\n              ? <button onClick={restoreDrive}>{t.loadDrive}</button>\n              : <button disabled={!cloudConfig.googleClientId} onClick={connectDrive}>{t.connectDrive}</button>}'''
-new_ui = '''{googleToken\n              ? <><button onClick={restoreDrive}>{t.loadDrive}</button><button onClick={disconnectDrive}>{t.disconnectDrive}</button></>\n              : <button disabled={!cloudConfig.googleClientId} onClick={connectDrive}>{t.connectDrive}</button>}'''
-if old_ui not in s:
-    raise SystemExit('ERROR: Google Drive action UI not found')
-s = s.replace(old_ui, new_ui, 1)
+# Normalize the Google Drive action area completely.
+# Disconnected: one button = Connect Google Drive.
+# Connected: Load from Drive + THE SAME connect-slot becomes Disconnect Drive.
+drive_marker = '<div><b>Google Drive</b>'
+drive_pos = s.find(drive_marker)
+if drive_pos == -1:
+    raise SystemExit('ERROR: Google Drive provider block not found')
+action_start = s.find('<div className="cloudActions">', drive_pos)
+if action_start == -1:
+    raise SystemExit('ERROR: Google Drive cloudActions not found')
+action_end = s.find('</div>', action_start)
+if action_end == -1:
+    raise SystemExit('ERROR: Google Drive cloudActions closing div not found')
+action_end += len('</div>')
+normalized = '''<div className="cloudActions">{googleToken\n              ? <><button onClick={restoreDrive}>{t.loadDrive}</button><button onClick={disconnectDrive}>{t.disconnectDrive}</button></>\n              : <button disabled={!cloudConfig.googleClientId} onClick={connectDrive}>{t.connectDrive}</button>}\n            </div>'''
+s = s[:action_start] + normalized + s[action_end:]
 
 app.write_text(s, encoding='utf-8')
 
-# Add token/grant clearing helper to cloud.ts. This disconnects the app from Drive
-# without deleting or changing any files already stored in Google Drive.
+# Local Google token/grant cleanup helper.
 cloud = Path('src/cloud.ts')
 c = cloud.read_text(encoding='utf-8')
 if 'export function disconnectGoogleDriveLocal()' not in c:
@@ -152,6 +154,18 @@ grep -q 'button.className = "primary printEditorLauncherV2"' src/printEditorV3.t
 grep -q 'disconnectGoogleDriveLocal' src/App.tsx src/cloud.ts
 grep -q 'disconnectDrive' src/App.tsx
 
+# There must be only one Drive disconnect action in the normalized provider UI.
+python3 - <<'PY'
+from pathlib import Path
+s=Path('src/App.tsx').read_text(encoding='utf-8')
+pos=s.find('<div><b>Google Drive</b>')
+end=s.find('</div>\n          </div>', pos)
+chunk=s[pos:end if end!=-1 else pos+2500]
+count=chunk.count('onClick={disconnectDrive}')
+if count != 1:
+    raise SystemExit(f'ERROR: expected exactly one Drive disconnect action, found {count}')
+PY
+
 echo "Storage/session/Drive checks passed."
 
 mkdir -p "$ROLLBACK"
@@ -179,9 +193,9 @@ echo "✓ working print editor preserved"
 echo "✓ margin behavior preserved"
 echo "✓ blue Print / PDF button kept at top-right"
 echo "✓ EC2 singleton workspace protocol restored"
-echo "✓ obsolete storage-history UI removed"
 echo "✓ new app sessions start with EC2 disconnected"
-echo "✓ Google Drive Disconnect button added"
-echo "✓ successful Drive load no longer shows stale pink error state"
+echo "✓ Drive connect button now toggles to Disconnect after connection"
+echo "✓ no duplicate Drive disconnect button"
+echo "✓ successful Drive load clears stale pink error state"
 echo "✓ workspace unchanged: $AFTER"
 echo "============================================================"
