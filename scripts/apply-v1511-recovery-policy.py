@@ -4,24 +4,13 @@ from pathlib import Path
 path = Path('server/app.py')
 text = path.read_text(encoding='utf-8')
 
-# EC2 is the current workspace store. Historical recovery is handled outside
-# the live database by one scheduled daily SQLite safety copy, so the live
-# database must contain only the current workspace row.
-if 'EC2_RECOVERY_SNAPSHOTS = 0' not in text:
-    if 'EC2_RECOVERY_SNAPSHOTS = 3' in text:
-        text = text.replace('EC2_RECOVERY_SNAPSHOTS = 3', 'EC2_RECOVERY_SNAPSHOTS = 0', 1)
-    else:
-        text = text.replace(
-            'EC2_CV_LIMIT = 20\n',
-            'EC2_CV_LIMIT = 20\nEC2_RECOVERY_SNAPSHOTS = 0\n',
-            1,
-        )
+start = text.find('    def save(self, payload: dict[str, Any], digest: str, base_revision: int) -> tuple[dict[str, Any], bool]:')
+end = text.find('    def create_session(', start)
+if start == -1 or end == -1:
+    raise SystemExit('recovery policy: Store.save block not found')
 
-anchor = '''            database.execute(\n                """CREATE TABLE IF NOT EXISTS sessions (\n                    token_hash TEXT PRIMARY KEY,\n                    csrf TEXT NOT NULL,\n                    expires_at REAL NOT NULL\n                )"""\n            )\n'''
-insert = anchor + '''            # The live EC2 database is not a revision archive. Keep only the\n            # newest/current workspace row. Daily recovery copies are separate\n            # SQLite files created by the EC2 maintenance timer.\n            database.execute(\n                "DELETE FROM backups WHERE revision NOT IN "\n                "(SELECT revision FROM backups ORDER BY revision DESC LIMIT 1)"\n            )\n'''
-if anchor not in text:
-    raise SystemExit('v1.6.1 recovery policy: initialize anchor not found')
-text = text.replace(anchor, insert, 1)
+replacement = '''    def _active_day_recovery(self, current: sqlite3.Row) -> None:\n        \"\"\"Keep one recovery point per day in which a real content change occurs.\"\"\"\n        recovery_dir = self.data_dir / \"active-day-recovery\"\n        recovery_dir.mkdir(parents=True, exist_ok=True, mode=0o700)\n        os.chmod(recovery_dir, 0o700)\n        day = datetime.now(timezone.utc).date().isoformat()\n        target = recovery_dir / f\"codecafe-cv-{day}.recovery.json\"\n        if target.exists():\n            return\n        recovery = {\n            \"savedAt\": current[\"saved_at\"],\n            \"digest\": current[\"digest\"],\n            \"payload\": json.loads(current[\"payload\"]),\n        }\n        temporary = target.with_suffix(target.suffix + \".tmp\")\n        temporary.write_text(json.dumps(recovery, ensure_ascii=False, indent=2), encoding=\"utf-8\")\n        os.chmod(temporary, 0o600)\n        temporary.replace(target)\n        recoveries = sorted(recovery_dir.glob(\"codecafe-cv-*.recovery.json\"), key=lambda item: item.name, reverse=True)\n        for old in recoveries[7:]:\n            old.unlink(missing_ok=True)\n\n    def save(self, payload: dict[str, Any], digest: str, base_revision: int) -> tuple[dict[str, Any], bool]:\n        serialized = json.dumps(payload, separators=(\",\", \":\"), sort_keys=True)\n        now = datetime.now(timezone.utc).isoformat()\n        with self.connect() as database:\n            database.execute(\"BEGIN IMMEDIATE\")\n            current = database.execute(\n                \"SELECT revision, saved_at, digest, payload FROM backups ORDER BY revision DESC LIMIT 1\"\n            ).fetchone()\n            current_revision = int(current[\"revision\"]) if current else 0\n            if current and current[\"digest\"] == digest:\n                database.commit()\n                return {\n                    \"revision\": current_revision,\n                    \"savedAt\": current[\"saved_at\"],\n                }, True\n            if base_revision != current_revision:\n                database.rollback()\n                raise ConflictError(current_revision)\n            if current:\n                self._active_day_recovery(current)\n                database.execute(\n                    \"UPDATE backups SET saved_at = ?, digest = ?, payload = ? WHERE revision = ?\",\n                    (now, digest, serialized, current_revision),\n                )\n                revision = current_revision\n            else:\n                cursor = database.execute(\n                    \"INSERT INTO backups(saved_at, digest, payload) VALUES (?, ?, ?)\",\n                    (now, digest, serialized),\n                )\n                revision = int(cursor.lastrowid)\n            database.execute(\"DELETE FROM backups WHERE revision <> ?\", (revision,))\n            database.commit()\n        return {\"revision\": revision, \"savedAt\": now}, False\n\n'''
 
+text = text[:start] + replacement + text[end:]
 path.write_text(text, encoding='utf-8')
-print('v1.6.1 recovery policy applied: one live EC2 workspace row; daily recovery is external to the live database.')
+print('v1.6.1 EC2 recovery policy applied: one live workspace, one recovery point per active-change day, seven points max.')
