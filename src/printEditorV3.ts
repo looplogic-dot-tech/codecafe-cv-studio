@@ -6,44 +6,51 @@ type PrintSettings = {
   right: number;
   bottom: number;
   left: number;
-  protectBreaks: boolean;
-  manualBreaks: string[];
   paperSize: PaperKey;
+  protectBreaks: boolean;
 };
 
-type BreakCandidate = { key: string; element: HTMLElement };
-
-const STYLE_ID = "codecafe-print-editor-v3-style";
-const LAUNCHER_ID = "codecafe-print-editor-launcher";
 const OVERLAY_ID = "codecafe-print-editor-v3";
+const LAUNCHER_ID = "codecafe-print-editor-launcher";
+const STYLE_ID = "codecafe-print-editor-runtime-style";
 const WORKSPACE_KEY = "codecafe-cv-workspace-v2";
 const PREVIEW_SCALE = 0.56;
 const PX_PER_MM = 96 / 25.4;
 
-const papers = {
-  letter: { es: "Carta", en: "Letter", width: 215.9, height: 279.4, css: "Letter" },
-  a4: { es: "A4", en: "A4", width: 210, height: 297, css: "A4" },
-  legal: { es: "Legal", en: "Legal", width: 215.9, height: 355.6, css: "Legal" },
-} satisfies Record<PaperKey, { es: string; en: string; width: number; height: number; css: string }>;
+const PAPERS: Record<PaperKey, { width: number; height: number; css: string; es: string; en: string }> = {
+  letter: { width: 215.9, height: 279.4, css: "Letter", es: "Carta", en: "Letter" },
+  a4: { width: 210, height: 297, css: "A4", es: "A4", en: "A4" },
+  legal: { width: 215.9, height: 355.6, css: "Legal", es: "Legal", en: "Legal" },
+};
 
-const defaults: PrintSettings = {
+const DEFAULTS: PrintSettings = {
   top: 14,
   right: 16,
   bottom: 14,
   left: 16,
-  protectBreaks: true,
-  manualBreaks: [],
   paperSize: "letter",
-};
-
-const presets = {
-  compact: { top: 10, right: 12, bottom: 10, left: 12 },
-  balanced: { top: 14, right: 16, bottom: 14, left: 16 },
-  wide: { top: 18, right: 20, bottom: 18, left: 20 },
+  protectBreaks: true,
 };
 
 function language(): "es" | "en" {
   return document.querySelector("main")?.getAttribute("lang") === "en" ? "en" : "es";
+}
+
+function clampMargin(value: number): number {
+  if (!Number.isFinite(value)) return 14;
+  return Math.max(0, Math.min(50, Math.round(value * 10) / 10));
+}
+
+function normalize(value: Partial<PrintSettings> | null | undefined): PrintSettings {
+  const paperSize: PaperKey = value?.paperSize === "a4" || value?.paperSize === "legal" ? value.paperSize : "letter";
+  return {
+    top: clampMargin(Number(value?.top ?? DEFAULTS.top)),
+    right: clampMargin(Number(value?.right ?? DEFAULTS.right)),
+    bottom: clampMargin(Number(value?.bottom ?? DEFAULTS.bottom)),
+    left: clampMargin(Number(value?.left ?? DEFAULTS.left)),
+    paperSize,
+    protectBreaks: value?.protectBreaks !== false,
+  };
 }
 
 function readWorkspace(): any | null {
@@ -59,42 +66,21 @@ function activeDocumentId(): string {
   return readWorkspace()?.activeDocumentId || "default";
 }
 
-function storageKey(): string {
+function settingsKey(): string {
   return `codecafe-print-settings:${activeDocumentId()}`;
 }
 
-function clamp(value: number): number {
-  if (!Number.isFinite(value)) return 14;
-  return Math.min(50, Math.max(0, Math.round(value * 10) / 10));
-}
-
-function normalize(value: any): PrintSettings {
-  const paperSize: PaperKey = value?.paperSize === "a4" || value?.paperSize === "legal" ? value.paperSize : "letter";
-  return {
-    top: clamp(Number(value?.top ?? defaults.top)),
-    right: clamp(Number(value?.right ?? defaults.right)),
-    bottom: clamp(Number(value?.bottom ?? defaults.bottom)),
-    left: clamp(Number(value?.left ?? defaults.left)),
-    protectBreaks: value?.protectBreaks !== false,
-    manualBreaks: Array.isArray(value?.manualBreaks) ? value.manualBreaks.filter((v: unknown): v is string => typeof v === "string") : [],
-    paperSize,
-  };
-}
-
 function loadSettings(): PrintSettings {
-  let local: any = null;
-  try { local = JSON.parse(localStorage.getItem(storageKey()) || "null"); } catch {}
+  let local: Partial<PrintSettings> | null = null;
+  try { local = JSON.parse(localStorage.getItem(settingsKey()) || "null"); } catch {}
   const workspace = readWorkspace();
   const document = workspace?.documents?.find((item: any) => item.id === workspace.activeDocumentId);
   const synced = document?.settings?.print || null;
-  const paperSize = local?.paperSize || localStorage.getItem(`codecafe-print-paper:${activeDocumentId()}`) || "letter";
-  return normalize({ ...(synced || {}), ...(local || {}), paperSize });
+  return normalize({ ...(synced || {}), ...(local || {}) });
 }
 
 function saveSettings(settings: PrintSettings): void {
-  localStorage.setItem(storageKey(), JSON.stringify(settings));
-  localStorage.setItem(`codecafe-print-paper:${activeDocumentId()}`, settings.paperSize);
-
+  localStorage.setItem(settingsKey(), JSON.stringify(settings));
   const workspace = readWorkspace();
   if (!workspace) return;
   const documents = workspace.documents.map((document: any) => document.id === workspace.activeDocumentId
@@ -103,12 +89,13 @@ function saveSettings(settings: PrintSettings): void {
         settings: {
           ...document.settings,
           print: {
+            ...(document.settings?.print || {}),
             top: settings.top,
             right: settings.right,
             bottom: settings.bottom,
             left: settings.left,
+            paperSize: settings.paperSize,
             protectBreaks: settings.protectBreaks,
-            manualBreaks: settings.manualBreaks,
           },
         },
         updatedAt: new Date().toISOString(),
@@ -117,41 +104,37 @@ function saveSettings(settings: PrintSettings): void {
   localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ ...workspace, documents }));
 }
 
-function breakCandidates(root: ParentNode): BreakCandidate[] {
-  const selector = ".cvSection,.cvJob,.cvProject,.twoCols,.toolCategory,.editableSectionTitle,.jobHeading,section,h2,h3,p";
-  const seen = new Set<HTMLElement>();
-  const result: BreakCandidate[] = [];
-  root.querySelectorAll<HTMLElement>(selector).forEach((element) => {
-    if (seen.has(element)) return;
-    if (element.closest(`#${OVERLAY_ID} .printEditorControls`)) return;
-    seen.add(element);
-    result.push({ key: `node:${result.length}`, element });
-  });
-  return result;
+function sourcePaper(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".previewPane .paper");
 }
 
-function applyManualBreakClasses(settings: PrintSettings): void {
-  const paper = document.querySelector<HTMLElement>(".previewPane .paper");
-  if (!paper) return;
-  paper.querySelectorAll<HTMLElement>(".manualPrintBreak").forEach((element) => element.classList.remove("manualPrintBreak"));
-  const selected = new Set(settings.manualBreaks);
-  for (const candidate of breakCandidates(paper)) if (selected.has(candidate.key)) candidate.element.classList.add("manualPrintBreak");
+function makeContentClone(source: HTMLElement): HTMLElement {
+  const clone = source.cloneNode(true) as HTMLElement;
+  clone.classList.remove("paper");
+  clone.classList.add("printEditorFlowContent");
+  clone.querySelectorAll<HTMLElement>(".manualPrintBreak,.printMarginGuidesV2,.printBreakTargetV2,.printBreakSpacerV2").forEach((node) => node.remove());
+  clone.style.setProperty("width", "100%", "important");
+  clone.style.setProperty("max-width", "none", "important");
+  clone.style.setProperty("min-height", "0", "important");
+  clone.style.setProperty("margin", "0", "important");
+  clone.style.setProperty("padding", "0", "important");
+  clone.style.setProperty("box-shadow", "none", "important");
+  clone.style.setProperty("box-sizing", "border-box", "important");
+  clone.style.setProperty("background", "transparent", "important");
+  return clone;
 }
 
-function applyPrintStyle(settings: PrintSettings): void {
+function installRuntimePrintStyle(settings: PrintSettings): void {
   let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
   if (!style) {
     style = document.createElement("style");
     style.id = STYLE_ID;
     document.head.appendChild(style);
   }
-  const paper = papers[settings.paperSize];
-  const protectedBreaks = settings.protectBreaks ? `
-    .cvHeader,.cvJob,.cvProject,.twoCols,.toolCategory{break-inside:avoid-page;page-break-inside:avoid}
-    .editableSectionTitle,.jobHeading{break-after:avoid-page;page-break-after:avoid}
-    .editableSectionTitle + *{break-before:avoid-page;page-break-before:avoid}
-    p,li{orphans:3;widows:3}
-  ` : "";
+  const paper = PAPERS[settings.paperSize];
+  const protectedCss = settings.protectBreaks
+    ? ".cvHeader,.cvJob,.cvProject,.twoCols,.toolCategory{break-inside:avoid-page!important;page-break-inside:avoid!important}.editableSectionTitle,.jobHeading{break-after:avoid-page!important;page-break-after:avoid!important}"
+    : "";
   style.textContent = `
     @page{size:${paper.css} portrait;margin:${settings.top}mm ${settings.right}mm ${settings.bottom}mm ${settings.left}mm}
     @media print{
@@ -160,15 +143,13 @@ function applyPrintStyle(settings: PrintSettings): void {
       .topbar,.editor,.previewTop,.atsCheck,#${OVERLAY_ID},#${LAUNCHER_ID}{display:none!important}
       .workspace{display:block!important;min-height:0!important}
       .previewPane{padding:0!important;max-height:none!important;overflow:visible!important}
-      .paper{box-shadow:none!important;max-width:none!important;width:auto!important;min-height:0!important;margin:0!important;padding:0!important}
-      .manualPrintBreak{break-before:page!important;page-break-before:always!important}
-      ${protectedBreaks}
+      .previewPane>.paper,.paper{box-shadow:none!important;max-width:none!important;width:auto!important;min-height:0!important;margin:0!important;padding:0!important}
+      ${protectedCss}
     }
   `;
-  applyManualBreakClasses(settings);
 }
 
-function numberField(label: string, value: number, onChange: (value: number) => void): HTMLLabelElement {
+function createNumberField(label: string, side: MarginSide, value: number, onChange: (side: MarginSide, value: number) => void): HTMLElement {
   const field = document.createElement("label");
   field.className = "printEditorNumberField";
   const caption = document.createElement("span");
@@ -180,59 +161,37 @@ function numberField(label: string, value: number, onChange: (value: number) => 
   input.max = "50";
   input.step = "0.5";
   input.value = String(value);
-  input.addEventListener("change", () => onChange(clamp(Number(input.value))));
   const unit = document.createElement("span");
   unit.textContent = "mm";
+  const commit = () => onChange(side, clampMargin(Number(input.value)));
+  input.addEventListener("input", commit);
+  input.addEventListener("change", commit);
   row.append(input, unit);
   field.append(caption, row);
   return field;
 }
 
-function addBreakTargets(page: HTMLElement, settings: PrintSettings, enabled: boolean, toggle: (key: string) => void): void {
-  const selected = new Set(settings.manualBreaks);
-  if (!enabled && selected.size === 0) return;
-  for (const candidate of breakCandidates(page)) {
-    const active = selected.has(candidate.key);
-    if (!enabled && !active) continue;
-    const marker = document.createElement("button");
-    marker.type = "button";
-    marker.className = `printBreakTargetV2${active ? " active" : ""}`;
-    marker.title = active ? (language() === "es" ? "Quitar salto" : "Remove break") : (language() === "es" ? "Insertar salto aquí" : "Insert break here");
-    marker.innerHTML = `<span>${active ? "✓" : "+"}</span>`;
-    marker.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      toggle(candidate.key);
-    });
-    candidate.element.before(marker);
-  }
-}
-
-function addMarginGuides(page: HTMLElement, settings: PrintSettings, onDrag: (side: MarginSide, value: number) => void): void {
-  const paper = papers[settings.paperSize];
+function attachGuides(page: HTMLElement, settings: PrintSettings, onChange: (side: MarginSide, value: number) => void): void {
+  const paper = PAPERS[settings.paperSize];
   const guides = document.createElement("div");
   guides.className = "printMarginGuidesV2";
-
-  for (const side of ["top", "right", "bottom", "left"] as MarginSide[]) {
+  const sides: MarginSide[] = ["top", "right", "bottom", "left"];
+  for (const side of sides) {
     const guide = document.createElement("button");
     guide.type = "button";
     guide.className = `printMarginGuideV2 ${side}`;
-    if (side === "left") guide.style.left = `${settings.left}mm`;
-    if (side === "right") guide.style.right = `${settings.right}mm`;
-    if (side === "top") guide.style.top = `${settings.top}mm`;
-    if (side === "bottom") guide.style.bottom = `${settings.bottom}mm`;
-
+    guide.style.setProperty(side, `${settings[side]}mm`, "important");
     guide.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       event.stopPropagation();
       const rect = page.getBoundingClientRect();
       const move = (pointer: PointerEvent) => {
-        let value = 0;
-        if (side === "left") value = ((pointer.clientX - rect.left) / rect.width) * paper.width;
-        if (side === "right") value = ((rect.right - pointer.clientX) / rect.width) * paper.width;
-        if (side === "top") value = ((pointer.clientY - rect.top) / rect.height) * paper.height;
-        if (side === "bottom") value = ((rect.bottom - pointer.clientY) / rect.height) * paper.height;
-        onDrag(side, clamp(value));
+        let next = settings[side];
+        if (side === "left") next = ((pointer.clientX - rect.left) / rect.width) * paper.width;
+        if (side === "right") next = ((rect.right - pointer.clientX) / rect.width) * paper.width;
+        if (side === "top") next = ((pointer.clientY - rect.top) / rect.height) * paper.height;
+        if (side === "bottom") next = ((rect.bottom - pointer.clientY) / rect.height) * paper.height;
+        onChange(side, clampMargin(next));
       };
       const up = () => {
         window.removeEventListener("pointermove", move);
@@ -241,304 +200,195 @@ function addMarginGuides(page: HTMLElement, settings: PrintSettings, onDrag: (si
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up, { once: true });
     });
-    guides.append(guide);
+    guides.appendChild(guide);
   }
-  page.append(guides);
+  page.appendChild(guides);
 }
 
-function simulateBreaks(page: HTMLElement, settings: PrintSettings): void {
-  page.querySelectorAll(".printBreakSpacerV2").forEach((node) => node.remove());
-  const selected = new Set(settings.manualBreaks);
-  const paper = papers[settings.paperSize];
-  const pageHeight = paper.height * PX_PER_MM;
-  const topMargin = settings.top * PX_PER_MM;
-  const candidates = breakCandidates(page).filter((candidate) => selected.has(candidate.key));
-  candidates.sort((a, b) => a.element.offsetTop - b.element.offsetTop);
-  for (const candidate of candidates) {
-    const currentTop = candidate.element.offsetTop;
-    const currentPage = Math.floor(currentTop / pageHeight);
-    const inside = currentTop - currentPage * pageHeight;
-    if (inside <= topMargin + 8) continue;
-    const target = (currentPage + 1) * pageHeight + topMargin;
-    const needed = Math.max(0, target - currentTop);
-    if (needed < 2) continue;
-    const spacer = document.createElement("span");
-    spacer.className = "printBreakSpacerV2";
-    spacer.style.height = `${needed}px`;
-    candidate.element.before(spacer);
-  }
+function measureContent(source: HTMLElement, widthMm: number): number {
+  const holder = document.createElement("div");
+  holder.style.cssText = "position:absolute;left:-100000px;top:0;visibility:hidden;pointer-events:none;";
+  const clone = makeContentClone(source);
+  clone.style.setProperty("width", `${widthMm}mm`, "important");
+  holder.appendChild(clone);
+  document.body.appendChild(holder);
+  const height = Math.max(clone.scrollHeight, clone.getBoundingClientRect().height);
+  holder.remove();
+  return height;
 }
 
-function buildPreview(settings: PrintSettings, host: HTMLElement, breakMode: boolean, toggle: (key: string) => void, onMargin: (side: MarginSide, value: number) => void): void {
+function buildPageStack(host: HTMLElement, settings: PrintSettings, onChange: (side: MarginSide, value: number) => void): void {
   host.replaceChildren();
-  const source = document.querySelector<HTMLElement>(".previewPane .paper");
-  if (!source) return;
-  const paper = papers[settings.paperSize];
+  const source = sourcePaper();
+  if (!source) {
+    host.textContent = language() === "es" ? "No hay una vista previa de CV disponible." : "CV preview is not available.";
+    return;
+  }
 
-  const viewport = document.createElement("div");
-  viewport.className = "printEditorPreviewViewport";
-  const frame = document.createElement("div");
-  frame.className = "printEditorPreviewFrame";
-  const page = source.cloneNode(true) as HTMLElement;
-  page.classList.add("printEditorPaperV2");
-  page.removeAttribute("style");
-  page.querySelectorAll<HTMLElement>(".manualPrintBreak").forEach((element) => element.classList.remove("manualPrintBreak"));
-  page.style.width = `${paper.width}mm`;
-  page.style.minHeight = `${paper.height}mm`;
-  page.style.maxWidth = "none";
-  page.style.margin = "0";
-  page.style.boxShadow = "none";
-  page.style.boxSizing = "border-box";
-  page.style.padding = `${settings.top}mm ${settings.right}mm ${settings.bottom}mm ${settings.left}mm`;
-  page.style.position = "relative";
-  page.style.transform = `scale(${PREVIEW_SCALE})`;
-  page.style.transformOrigin = "top left";
+  const paper = PAPERS[settings.paperSize];
+  const contentWidthMm = Math.max(40, paper.width - settings.left - settings.right);
+  const contentHeightMm = Math.max(40, paper.height - settings.top - settings.bottom);
+  const contentHeightPx = contentHeightMm * PX_PER_MM;
+  const measuredHeight = measureContent(source, contentWidthMm);
+  const pageCount = Math.max(1, Math.min(30, Math.ceil(measuredHeight / contentHeightPx)));
 
-  addBreakTargets(page, settings, breakMode, toggle);
-  addMarginGuides(page, settings, onMargin);
-  frame.append(page);
-  viewport.append(frame);
-  host.append(viewport);
+  const stack = document.createElement("div");
+  stack.className = "printEditorPageStack";
 
-  requestAnimationFrame(() => {
-    simulateBreaks(page, settings);
-    requestAnimationFrame(() => {
-      const minHeight = paper.height * PX_PER_MM;
-      const fullHeight = Math.max(page.scrollHeight, minHeight);
-      frame.style.width = `${paper.width * PX_PER_MM * PREVIEW_SCALE}px`;
-      frame.style.height = `${fullHeight * PREVIEW_SCALE}px`;
-    });
-  });
+  for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+    const frame = document.createElement("div");
+    frame.className = "printEditorPreviewFrame";
+    frame.style.width = `${paper.width * PX_PER_MM * PREVIEW_SCALE}px`;
+    frame.style.height = `${paper.height * PX_PER_MM * PREVIEW_SCALE}px`;
+
+    const page = document.createElement("div");
+    page.className = "printEditorPaperV2";
+    page.style.setProperty("width", `${paper.width}mm`, "important");
+    page.style.setProperty("height", `${paper.height}mm`, "important");
+    page.style.setProperty("min-height", `${paper.height}mm`, "important");
+    page.style.setProperty("max-width", "none", "important");
+    page.style.setProperty("margin", "0", "important");
+    page.style.setProperty("padding", "0", "important");
+    page.style.setProperty("position", "relative", "important");
+    page.style.setProperty("overflow", "hidden", "important");
+    page.style.setProperty("transform", `scale(${PREVIEW_SCALE})`, "important");
+    page.style.setProperty("transform-origin", "top left", "important");
+
+    const viewport = document.createElement("div");
+    viewport.className = "printEditorContentViewport";
+    viewport.style.setProperty("position", "absolute", "important");
+    viewport.style.setProperty("top", `${settings.top}mm`, "important");
+    viewport.style.setProperty("right", `${settings.right}mm`, "important");
+    viewport.style.setProperty("bottom", `${settings.bottom}mm`, "important");
+    viewport.style.setProperty("left", `${settings.left}mm`, "important");
+    viewport.style.setProperty("overflow", "hidden", "important");
+    viewport.style.setProperty("box-sizing", "border-box", "important");
+
+    const flow = makeContentClone(source);
+    flow.style.setProperty("position", "absolute", "important");
+    flow.style.setProperty("left", "0", "important");
+    flow.style.setProperty("right", "0", "important");
+    flow.style.setProperty("top", `${-(pageIndex * contentHeightPx)}px`, "important");
+    flow.style.setProperty("width", "100%", "important");
+
+    viewport.appendChild(flow);
+    page.appendChild(viewport);
+    attachGuides(page, settings, onChange);
+    frame.appendChild(page);
+    stack.appendChild(frame);
+  }
+  host.appendChild(stack);
 }
 
-function openPrintEditor(): void {
+function openEditor(): void {
   document.getElementById(OVERLAY_ID)?.remove();
   let settings = loadSettings();
-  let breakMode = false;
-  applyPrintStyle(settings);
   const es = language() === "es";
-
   const text = es ? {
-    title: "Editor de impresión",
-    subtitle: "Vista previa y ajustes en un solo lugar. Carta es el tamaño predeterminado.",
-    paper: "Papel",
-    margins: "Márgenes",
-    compact: "Compactos",
-    balanced: "Equilibrados",
-    wide: "Amplios",
-    top: "Superior",
-    right: "Derecho",
-    bottom: "Inferior",
-    left: "Izquierdo",
-    protect: "Evitar cortes entre puestos, proyectos y encabezados",
-    breaks: "Saltos de página",
-    breakMode: "Colocar saltos",
-    breaksHelp: "Activa este modo y usa los pequeños + en la vista previa donde quieras iniciar una página nueva.",
-    dragHelp: "Arrastra las líneas de margen sobre la hoja. Los valores se actualizan y siguen siendo editables.",
-    clear: "Quitar saltos",
-    reset: "Restablecer",
-    print: "Imprimir / Guardar PDF",
+    title: "Editor de impresión", subtitle: "Los márgenes controlan directamente el área útil de cada página.", paper: "Papel", margins: "Márgenes",
+    top: "Superior", right: "Derecho", bottom: "Inferior", left: "Izquierdo", compact: "Compactos", balanced: "Equilibrados", wide: "Amplios",
+    protect: "Evitar cortes entre puestos, proyectos y encabezados", reset: "Restablecer", print: "Imprimir / Guardar PDF", close: "Cerrar",
   } : {
-    title: "Print editor",
-    subtitle: "Preview and settings in one place. Letter is the default paper size.",
-    paper: "Paper",
-    margins: "Margins",
-    compact: "Compact",
-    balanced: "Balanced",
-    wide: "Wide",
-    top: "Top",
-    right: "Right",
-    bottom: "Bottom",
-    left: "Left",
-    protect: "Avoid splits between jobs, projects and headings",
-    breaks: "Page breaks",
-    breakMode: "Place breaks",
-    breaksHelp: "Enable this mode and use the small + controls where a new page should begin.",
-    dragHelp: "Drag the margin lines on the page. Values update and remain editable.",
-    clear: "Clear breaks",
-    reset: "Reset",
-    print: "Print / Save PDF",
+    title: "Print editor", subtitle: "Margins directly control the usable area of every page.", paper: "Paper", margins: "Margins",
+    top: "Top", right: "Right", bottom: "Bottom", left: "Left", compact: "Compact", balanced: "Balanced", wide: "Wide",
+    protect: "Avoid splitting jobs, projects and headings", reset: "Reset", print: "Print / Save PDF", close: "Close",
   };
 
   const overlay = document.createElement("div");
   overlay.id = OVERLAY_ID;
   overlay.className = "printEditorOverlayV2";
-  const dialog = document.createElement("section");
+  const dialog = document.createElement("div");
   dialog.className = "printEditorDialogV2";
   const previewColumn = document.createElement("div");
   previewColumn.className = "printEditorPreviewColumnV2";
   const previewHost = document.createElement("div");
   previewHost.className = "printEditorPreviewHostV2";
-  previewColumn.append(previewHost);
-
-  const controls = document.createElement("aside");
+  previewColumn.appendChild(previewHost);
+  const controls = document.createElement("div");
   controls.className = "printEditorControls";
-  const head = document.createElement("div");
-  head.className = "printEditorHeadV2";
-  const heading = document.createElement("div");
-  const eyebrow = document.createElement("span");
-  eyebrow.className = "eyebrow";
-  eyebrow.textContent = "CODECAFE PRINT";
-  const h2 = document.createElement("h2");
-  h2.textContent = text.title;
-  const subtitle = document.createElement("p");
-  subtitle.textContent = text.subtitle;
-  heading.append(eyebrow, h2, subtitle);
-  const closeX = document.createElement("button");
-  closeX.type = "button";
-  closeX.className = "printEditorCloseV2";
-  closeX.textContent = "×";
-  head.append(heading, closeX);
-
-  const paperRow = document.createElement("div");
-  paperRow.className = "printEditorCompactRowV2";
-  const paperLabel = document.createElement("label");
-  paperLabel.textContent = text.paper;
-  const paperSelect = document.createElement("select");
-  for (const key of Object.keys(papers) as PaperKey[]) {
-    const option = document.createElement("option");
-    option.value = key;
-    option.textContent = es ? papers[key].es : papers[key].en;
-    paperSelect.append(option);
-  }
-  paperSelect.value = settings.paperSize;
-  paperLabel.append(paperSelect);
-  paperRow.append(paperLabel);
-
-  const marginHeader = document.createElement("div");
-  marginHeader.className = "printEditorSectionTitleV2";
-  const marginTitle = document.createElement("h3");
-  marginTitle.textContent = text.margins;
-  const dragHelp = document.createElement("span");
-  dragHelp.textContent = text.dragHelp;
-  marginHeader.append(marginTitle, dragHelp);
-
-  const presetRow = document.createElement("div");
-  presetRow.className = "printEditorPresetRowV2";
-  const fields = document.createElement("div");
-  fields.className = "printEditorMarginGridV2";
-
-  const protectLabel = document.createElement("label");
-  protectLabel.className = "printEditorCheckRowV2";
-  const protect = document.createElement("input");
-  protect.type = "checkbox";
-  const protectText = document.createElement("span");
-  protectText.textContent = text.protect;
-  protectLabel.append(protect, protectText);
-
-  const breakBlock = document.createElement("div");
-  breakBlock.className = "printEditorBreakBlockV2";
-  const breakHeader = document.createElement("div");
-  breakHeader.className = "printEditorSectionTitleV2";
-  const breakTitle = document.createElement("h3");
-  breakTitle.textContent = text.breaks;
-  const breakToggle = document.createElement("button");
-  breakToggle.type = "button";
-  breakToggle.className = "printEditorBreakModeV2";
-  breakToggle.textContent = text.breakMode;
-  breakHeader.append(breakTitle, breakToggle);
-  const breakHelp = document.createElement("p");
-  breakHelp.className = "printEditorHintV2";
-  breakHelp.textContent = text.breaksHelp;
-  const clear = document.createElement("button");
-  clear.type = "button";
-  clear.className = "printEditorTextButtonV2";
-  clear.textContent = text.clear;
-  breakBlock.append(breakHeader, breakHelp, clear);
-
-  const actions = document.createElement("div");
-  actions.className = "printEditorActionsV2";
-  const reset = document.createElement("button");
-  reset.type = "button";
-  reset.textContent = text.reset;
-  const print = document.createElement("button");
-  print.type = "button";
-  print.className = "primary";
-  print.textContent = text.print;
-  actions.append(reset, print);
-
-  const refresh = () => {
-    saveSettings(settings);
-    applyPrintStyle(settings);
-    paperSelect.value = settings.paperSize;
-    protect.checked = settings.protectBreaks;
-    breakToggle.classList.toggle("active", breakMode);
-    clear.disabled = settings.manualBreaks.length === 0;
-    fields.replaceChildren(
-      numberField(text.top, settings.top, (value) => setSetting({ top: value })),
-      numberField(text.right, settings.right, (value) => setSetting({ right: value })),
-      numberField(text.bottom, settings.bottom, (value) => setSetting({ bottom: value })),
-      numberField(text.left, settings.left, (value) => setSetting({ left: value })),
-    );
-    buildPreview(settings, previewHost, breakMode, toggleBreak, (side, value) => setSetting({ [side]: value } as Partial<PrintSettings>));
-  };
+  dialog.append(previewColumn, controls);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
 
   const setSetting = (patch: Partial<PrintSettings>) => {
     settings = normalize({ ...settings, ...patch });
-    refresh();
+    saveSettings(settings);
+    render();
+  };
+  const changeMargin = (side: MarginSide, value: number) => setSetting({ [side]: value } as Partial<PrintSettings>);
+
+  const render = () => {
+    controls.replaceChildren();
+    const head = document.createElement("div"); head.className = "printEditorHeadV2";
+    const titleWrap = document.createElement("div");
+    const h2 = document.createElement("h2"); h2.textContent = text.title;
+    const subtitle = document.createElement("p"); subtitle.textContent = text.subtitle;
+    titleWrap.append(h2, subtitle);
+    const close = document.createElement("button"); close.type = "button"; close.className = "printEditorCloseV2"; close.textContent = "×"; close.title = text.close; close.onclick = () => overlay.remove();
+    head.append(titleWrap, close);
+
+    const paperLabel = document.createElement("label"); paperLabel.className = "printEditorCompactRowV2";
+    const paperText = document.createElement("span"); paperText.textContent = text.paper;
+    const select = document.createElement("select");
+    (["letter", "a4", "legal"] as PaperKey[]).forEach((key) => {
+      const option = document.createElement("option"); option.value = key; option.textContent = PAPERS[key][es ? "es" : "en"]; option.selected = settings.paperSize === key; select.appendChild(option);
+    });
+    select.onchange = () => setSetting({ paperSize: select.value as PaperKey });
+    paperLabel.append(paperText, select);
+
+    const marginTitle = document.createElement("h3"); marginTitle.textContent = text.margins;
+    const presets = document.createElement("div"); presets.className = "printEditorPresetRowV2";
+    const addPreset = (label: string, values: Pick<PrintSettings, "top" | "right" | "bottom" | "left">) => {
+      const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.onclick = () => setSetting(values); presets.appendChild(button);
+    };
+    addPreset(text.compact, { top: 10, right: 12, bottom: 10, left: 12 });
+    addPreset(text.balanced, { top: 14, right: 16, bottom: 14, left: 16 });
+    addPreset(text.wide, { top: 18, right: 20, bottom: 18, left: 20 });
+
+    const marginGrid = document.createElement("div"); marginGrid.className = "printEditorMarginGridV2";
+    marginGrid.append(
+      createNumberField(text.top, "top", settings.top, changeMargin),
+      createNumberField(text.right, "right", settings.right, changeMargin),
+      createNumberField(text.bottom, "bottom", settings.bottom, changeMargin),
+      createNumberField(text.left, "left", settings.left, changeMargin),
+    );
+
+    const protect = document.createElement("label"); protect.className = "printEditorCheckRowV2";
+    const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.checked = settings.protectBreaks; checkbox.onchange = () => setSetting({ protectBreaks: checkbox.checked });
+    const protectText = document.createElement("span"); protectText.textContent = text.protect; protect.append(checkbox, protectText);
+
+    const actions = document.createElement("div"); actions.className = "printEditorActionsV2";
+    const reset = document.createElement("button"); reset.type = "button"; reset.textContent = text.reset; reset.onclick = () => setSetting(DEFAULTS);
+    const print = document.createElement("button"); print.type = "button"; print.className = "primary"; print.textContent = text.print;
+    print.onclick = () => { saveSettings(settings); installRuntimePrintStyle(settings); requestAnimationFrame(() => window.print()); };
+    actions.append(reset, print);
+
+    controls.append(head, paperLabel, marginTitle, presets, marginGrid, protect, actions);
+    buildPageStack(previewHost, settings, changeMargin);
+    installRuntimePrintStyle(settings);
   };
 
-  const toggleBreak = (key: string) => {
-    const selected = new Set(settings.manualBreaks);
-    if (selected.has(key)) selected.delete(key); else selected.add(key);
-    setSetting({ manualBreaks: [...selected] });
-  };
-
-  paperSelect.addEventListener("change", () => setSetting({ paperSize: paperSelect.value as PaperKey }));
-  for (const [key, label] of [["compact", text.compact], ["balanced", text.balanced], ["wide", text.wide]] as const) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = label;
-    button.addEventListener("click", () => setSetting(presets[key]));
-    presetRow.append(button);
-  }
-  protect.addEventListener("change", () => setSetting({ protectBreaks: protect.checked }));
-  breakToggle.addEventListener("click", () => { breakMode = !breakMode; refresh(); });
-  clear.addEventListener("click", () => setSetting({ manualBreaks: [] }));
-  reset.addEventListener("click", () => { settings = { ...defaults }; breakMode = false; refresh(); });
-  print.addEventListener("click", () => { saveSettings(settings); applyPrintStyle(settings); window.print(); });
-  const close = () => { saveSettings(settings); overlay.remove(); };
-  closeX.addEventListener("click", close);
-  overlay.addEventListener("mousedown", (event) => { if (event.target === overlay) close(); });
-
-  controls.append(head, paperRow, marginHeader, presetRow, fields, protectLabel, breakBlock, actions);
-  dialog.append(previewColumn, controls);
-  overlay.append(dialog);
-  document.body.append(overlay);
-  refresh();
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.remove(); });
+  render();
 }
 
-function ensureLauncher(): void {
-  const actions = document.querySelector<HTMLElement>(".topActions");
-  if (!actions) return;
-  const original = actions.querySelector<HTMLButtonElement>(":scope > button.primary");
-  if (original && original.id !== LAUNCHER_ID && original.style.display !== "none") original.style.display = "none";
-
-  let button = document.getElementById(LAUNCHER_ID) as HTMLButtonElement | null;
-  if (!button) {
-    button = document.createElement("button");
-    button.id = LAUNCHER_ID;
-    button.className = "primary printEditorLauncherV2";
-    button.type = "button";
-    button.addEventListener("click", openPrintEditor);
-    actions.appendChild(button);
-  }
-
-  const desired = language() === "es" ? "Imprimir / PDF" : "Print / PDF";
-  if (button.textContent !== desired) button.textContent = desired;
+function installLauncher(): void {
+  if (document.getElementById(LAUNCHER_ID)) return;
+  const anchor = document.querySelector<HTMLElement>(".previewTop");
+  if (!anchor) return;
+  const button = document.createElement("button");
+  button.id = LAUNCHER_ID;
+  button.type = "button";
+  button.className = "zoom printEditorLauncherV2";
+  button.textContent = language() === "es" ? "Imprimir / PDF" : "Print / PDF";
+  button.addEventListener("click", openEditor);
+  anchor.appendChild(button);
 }
 
 export function installPrintEditorV3(): void {
-  ensureLauncher();
-
-  // Only watch structural changes. Do not rewrite the button on every mutation;
-  // doing so can create a self-triggering MutationObserver loop and freeze startup.
-  const bodyObserver = new MutationObserver(() => ensureLauncher());
-  bodyObserver.observe(document.body, { childList: true, subtree: true });
-
-  const main = document.querySelector("main");
-  if (main) {
-    const langObserver = new MutationObserver(() => ensureLauncher());
-    langObserver.observe(main, { attributes: true, attributeFilter: ["lang"] });
-  }
+  installRuntimePrintStyle(loadSettings());
+  installLauncher();
+  const observer = new MutationObserver(() => installLauncher());
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  window.addEventListener("beforeprint", () => installRuntimePrintStyle(loadSettings()));
 }
