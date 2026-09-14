@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""API privada y sin dependencias externas para CodeCafe CV Studio."""
-
+"""Private dependency-free API for CodeCafe CV Studio."""
 from __future__ import annotations
 
 import argparse
@@ -25,9 +24,9 @@ from typing import Any
 APP_NAME = "CodeCafe CV Sync"
 COOKIE_NAME = "codecafe_cv_session"
 MAX_BODY_BYTES = 12 * 1024 * 1024
-# Mantiene la sesión segura durante treinta días para que el respaldo automático no dependa de reconectar a diario.
 SESSION_SECONDS = 30 * 24 * 60 * 60
 PASSWORD_ITERATIONS = 310_000
+MAX_RECOVERY_FILES = 7
 
 
 def b64encode(value: bytes) -> str:
@@ -55,15 +54,19 @@ def verify_password(password: str, encoded: str) -> bool:
         return False
 
 
+class ConflictError(Exception):
+    pass
+
+
 class Store:
-    def __init__(self, data_dir: Path, retention: int) -> None:
+    def __init__(self, data_dir: Path) -> None:
         self.data_dir = data_dir
-        self.retention = retention
         self.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.data_dir, 0o700)
-        self.database_path = self.data_dir / "backups.sqlite3"
-        # Se conserva la sal heredada únicamente para poder abrir respaldos cifrados antiguos.
+        self.database_path = self.data_dir / "workspace.sqlite3"
         self.salt_path = self.data_dir / "encryption-salt"
+        self.recovery_dir = self.data_dir / "active-day-recovery"
+        self.recovery_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._initialize()
 
     def connect(self) -> sqlite3.Connection:
@@ -76,14 +79,13 @@ class Store:
     def _initialize(self) -> None:
         with self.connect() as database:
             database.execute(
-                """CREATE TABLE IF NOT EXISTS backups (
-                    revision INTEGER PRIMARY KEY AUTOINCREMENT,
+                """CREATE TABLE IF NOT EXISTS workspace_state (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
                     saved_at TEXT NOT NULL,
-                    digest TEXT NOT NULL UNIQUE,
+                    digest TEXT NOT NULL,
                     payload TEXT NOT NULL
                 )"""
             )
-            # Conserva sesiones autenticadas entre reinicios del servicio.
             database.execute(
                 """CREATE TABLE IF NOT EXISTS sessions (
                     token_hash TEXT PRIMARY KEY,
@@ -100,80 +102,71 @@ class Store:
     def encryption_salt(self) -> str:
         return self.salt_path.read_text(encoding="ascii").strip()
 
-    def latest(self) -> dict[str, Any] | None:
+    def load(self) -> dict[str, Any] | None:
         with self.connect() as database:
             row = database.execute(
-                "SELECT revision, saved_at, digest, payload FROM backups ORDER BY revision DESC LIMIT 1"
+                "SELECT saved_at, digest, payload FROM workspace_state WHERE id = 1"
             ).fetchone()
         if not row:
             return None
         return {
-            "revision": row["revision"],
             "savedAt": row["saved_at"],
             "digest": row["digest"],
             "payload": json.loads(row["payload"]),
         }
 
-    def revisions(self) -> list[dict[str, Any]]:
-        """Devuelve metadatos de revisiones sin incluir el contenido del CV."""
-        with self.connect() as database:
-            rows = database.execute(
-                "SELECT revision, saved_at, digest FROM backups ORDER BY revision DESC"
-            ).fetchall()
-        return [
-            {"revision": row["revision"], "savedAt": row["saved_at"], "digest": row["digest"]}
-            for row in rows
-        ]
+    def _write_daily_recovery(self, current: sqlite3.Row) -> None:
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        target = self.recovery_dir / f"codecafe-cv-{day}.recovery.json"
+        if target.exists():
+            return
+        target.write_text(
+            json.dumps(
+                {
+                    "savedAt": current["saved_at"],
+                    "digest": current["digest"],
+                    "payload": json.loads(current["payload"]),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        os.chmod(target, 0o600)
+        files = sorted(self.recovery_dir.glob("codecafe-cv-*.recovery.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in files[MAX_RECOVERY_FILES:]:
+            old.unlink(missing_ok=True)
 
-    def revision(self, revision: int) -> dict[str, Any] | None:
-        """Devuelve una revisión retenida por su identificador numérico."""
-        with self.connect() as database:
-            row = database.execute(
-                "SELECT revision, saved_at, digest, payload FROM backups WHERE revision = ?",
-                (revision,),
-            ).fetchone()
-        if not row:
-            return None
-        return {
-            "revision": row["revision"],
-            "savedAt": row["saved_at"],
-            "digest": row["digest"],
-            "payload": json.loads(row["payload"]),
-        }
-
-    def save(self, payload: dict[str, Any], digest: str, base_revision: int) -> tuple[dict[str, Any], bool]:
+    def save(self, payload: dict[str, Any], digest: str, base_digest: str) -> tuple[dict[str, Any], bool]:
         serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         now = datetime.now(timezone.utc).isoformat()
         with self.connect() as database:
             database.execute("BEGIN IMMEDIATE")
             current = database.execute(
-                "SELECT revision, saved_at, digest FROM backups ORDER BY revision DESC LIMIT 1"
+                "SELECT saved_at, digest, payload FROM workspace_state WHERE id = 1"
             ).fetchone()
-            current_revision = int(current["revision"]) if current else 0
-            if current and current["digest"] == digest:
+            current_digest = str(current["digest"]) if current else ""
+            if current and current_digest == digest:
                 database.commit()
-                return {
-                    "revision": current_revision,
-                    "savedAt": current["saved_at"],
-                }, True
-            if base_revision != current_revision:
+                return {"savedAt": current["saved_at"], "digest": current_digest}, True
+            if base_digest != current_digest:
                 database.rollback()
-                raise ConflictError(current_revision)
-            cursor = database.execute(
-                "INSERT INTO backups(saved_at, digest, payload) VALUES (?, ?, ?)",
+                raise ConflictError("Existe una copia más reciente en EC2.")
+            if current:
+                self._write_daily_recovery(current)
+            database.execute(
+                """INSERT INTO workspace_state(id, saved_at, digest, payload)
+                   VALUES(1, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                     saved_at = excluded.saved_at,
+                     digest = excluded.digest,
+                     payload = excluded.payload""",
                 (now, digest, serialized),
             )
-            revision = int(cursor.lastrowid)
-            database.execute(
-                "DELETE FROM backups WHERE revision NOT IN "
-                "(SELECT revision FROM backups ORDER BY revision DESC LIMIT ?)",
-                (self.retention,),
-            )
             database.commit()
-        return {"revision": revision, "savedAt": now}, False
+        return {"savedAt": now, "digest": digest}, False
 
     def create_session(self, token: str, csrf: str, expires_at: float) -> None:
-        """Guarda únicamente la huella del token para que la sesión sobreviva reinicios."""
         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
         with self.connect() as database:
             database.execute("DELETE FROM sessions WHERE expires_at < ?", (time.time(),))
@@ -183,7 +176,6 @@ class Store:
             )
 
     def validate_session(self, token: str) -> str | None:
-        """Devuelve el CSRF sólo cuando el token persistido continúa vigente."""
         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
         with self.connect() as database:
             row = database.execute(
@@ -196,16 +188,9 @@ class Store:
         return str(row["csrf"])
 
     def delete_session(self, token: str) -> None:
-        """Elimina la sesión persistida sin exponer el token original en SQLite."""
         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
         with self.connect() as database:
             database.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
-
-
-class ConflictError(Exception):
-    def __init__(self, current_revision: int) -> None:
-        super().__init__("Existe una copia más reciente en EC2.")
-        self.current_revision = current_revision
 
 
 class SessionRegistry:
@@ -240,13 +225,12 @@ class SessionRegistry:
             return None
         with self._lock:
             session = self._sessions.get(token)
-            if not session:
-                return self._store.validate_session(token)
-            expires, csrf = session
-            if expires < time.time():
+            if session:
+                expires, csrf = session
+                if expires >= time.time():
+                    return csrf
                 self._sessions.pop(token, None)
-                return None
-            return csrf
+        return self._store.validate_session(token)
 
     def delete(self, token: str | None) -> None:
         if token:
@@ -264,6 +248,23 @@ class AppServer(ThreadingHTTPServer):
         self.password_hash = password_hash
         self.allowed_origin = allowed_origin.rstrip("/")
         self.sessions = SessionRegistry(store)
+
+
+class RequestError(Exception):
+    def __init__(self, message: str, status: int = HTTPStatus.BAD_REQUEST, body: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.body = body or {"error": message}
+
+
+class UnauthorizedError(RequestError):
+    def __init__(self, message: str = "Sesión requerida.") -> None:
+        super().__init__(message, HTTPStatus.UNAUTHORIZED)
+
+
+class ForbiddenError(RequestError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, HTTPStatus.FORBIDDEN)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -328,37 +329,23 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if method == "GET" and path == "/api/session":
                 csrf = self.require_session()
-                latest = self.server.store.latest()
+                current = self.server.store.load()
                 self.json_response(HTTPStatus.OK, {
                     "csrfToken": csrf,
                     "encryptionSalt": self.server.store.encryption_salt,
-                    "currentRevision": latest["revision"] if latest else 0,
+                    "currentDigest": current["digest"] if current else "",
                 })
                 return
             if method == "DELETE" and path == "/api/session":
                 self.logout()
                 return
-            if method == "GET" and path == "/api/backups/latest":
+            if method == "GET" and path == "/api/workspace":
                 self.require_session()
-                self.json_response(HTTPStatus.OK, {"backup": self.server.store.latest()})
+                self.json_response(HTTPStatus.OK, {"workspace": self.server.store.load()})
                 return
-            if method == "GET" and path == "/api/backups":
-                self.require_session()
-                self.json_response(HTTPStatus.OK, {"revisions": self.server.store.revisions()})
-                return
-            if method == "GET" and path.startswith("/api/backups/"):
-                self.require_session()
-                revision_text = path.removeprefix("/api/backups/")
-                if not revision_text.isdigit():
-                    raise RequestError("La revisión solicitada es inválida.")
-                backup = self.server.store.revision(int(revision_text))
-                if not backup:
-                    raise RequestError("La revisión ya no existe.", HTTPStatus.NOT_FOUND)
-                self.json_response(HTTPStatus.OK, {"backup": backup})
-                return
-            if method == "POST" and path == "/api/backups":
+            if method == "POST" and path == "/api/workspace":
                 self.require_session(require_csrf=True)
-                self.save_backup()
+                self.save_workspace()
                 return
             self.json_response(HTTPStatus.NOT_FOUND, {"error": "Ruta no encontrada."})
         except RequestError as error:
@@ -376,15 +363,12 @@ class Handler(BaseHTTPRequestHandler):
             self.server.sessions.record_failure(address)
             raise UnauthorizedError("Contraseña incorrecta.")
         token, csrf = self.server.sessions.create()
-        latest = self.server.store.latest()
-        cookie = (
-            f"{COOKIE_NAME}={token}; Path=/api; Max-Age={SESSION_SECONDS}; "
-            "HttpOnly; Secure; SameSite=Strict"
-        )
+        current = self.server.store.load()
+        cookie = f"{COOKIE_NAME}={token}; Path=/api; Max-Age={SESSION_SECONDS}; HttpOnly; Secure; SameSite=Strict"
         self.json_response(HTTPStatus.OK, {
             "csrfToken": csrf,
             "encryptionSalt": self.server.store.encryption_salt,
-            "currentRevision": latest["revision"] if latest else 0,
+            "currentDigest": current["digest"] if current else "",
         }, cookie)
 
     def logout(self) -> None:
@@ -393,11 +377,11 @@ class Handler(BaseHTTPRequestHandler):
         cookie = f"{COOKIE_NAME}=; Path=/api; Max-Age=0; HttpOnly; Secure; SameSite=Strict"
         self.json_response(HTTPStatus.OK, {"ok": True}, cookie)
 
-    def save_backup(self) -> None:
+    def save_workspace(self) -> None:
         body = self.read_json()
         payload = body.get("payload")
         digest = body.get("digest")
-        base_revision = body.get("baseRevision")
+        base_digest = body.get("baseDigest")
         if not isinstance(payload, dict):
             raise RequestError("El respaldo debe ser un objeto JSON.")
         is_plain_workspace = payload.get("schema") in (1, 2)
@@ -406,15 +390,16 @@ class Handler(BaseHTTPRequestHandler):
             raise RequestError("El respaldo no corresponde a CodeCafe CV Studio.")
         if not isinstance(digest, str) or len(digest) != 64:
             raise RequestError("La huella SHA-256 es inválida.")
-        if not isinstance(base_revision, int) or base_revision < 0:
-            raise RequestError("La revisión base es inválida.")
+        if not isinstance(base_digest, str):
+            raise RequestError("La huella base es inválida.")
         try:
-            result, unchanged = self.server.store.save(payload, digest, base_revision)
+            result, unchanged = self.server.store.save(payload, digest, base_digest)
         except ConflictError as error:
+            current = self.server.store.load()
             raise RequestError(
                 str(error),
                 HTTPStatus.CONFLICT,
-                {"error": str(error), "currentRevision": error.current_revision},
+                {"error": str(error), "currentDigest": current["digest"] if current else ""},
             ) from error
         self.json_response(HTTPStatus.OK, {**result, "unchanged": unchanged})
 
@@ -426,23 +411,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802
         self.dispatch("DELETE")
-
-
-class RequestError(Exception):
-    def __init__(self, message: str, status: int = HTTPStatus.BAD_REQUEST, body: dict[str, Any] | None = None) -> None:
-        super().__init__(message)
-        self.status = status
-        self.body = body or {"error": message}
-
-
-class UnauthorizedError(RequestError):
-    def __init__(self, message: str = "Sesión requerida.") -> None:
-        super().__init__(message, HTTPStatus.UNAUTHORIZED)
-
-
-class ForbiddenError(RequestError):
-    def __init__(self, message: str) -> None:
-        super().__init__(message, HTTPStatus.FORBIDDEN)
 
 
 def main() -> None:
@@ -464,10 +432,8 @@ def main() -> None:
     data_dir = Path(os.environ.get("CODECAFE_CV_DATA_DIR", "/var/lib/codecafe-cv-sync"))
     host = os.environ.get("CODECAFE_CV_HOST", "127.0.0.1")
     port = int(os.environ.get("CODECAFE_CV_PORT", "5002"))
-    # Conserva hasta doscientas revisiones para que el autoguardado no desplace rápidamente copias útiles.
-    retention = max(2, min(int(os.environ.get("CODECAFE_CV_RETENTION", "200")), 200))
     origin = os.environ.get("CODECAFE_CV_ORIGIN", "https://cv.codecafe.io")
-    server = AppServer((host, port), Store(data_dir, retention), password_hash, origin)
+    server = AppServer((host, port), Store(data_dir), password_hash, origin)
     print(f"{APP_NAME} escuchando en http://{host}:{port}", flush=True)
     try:
         server.serve_forever()
