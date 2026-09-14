@@ -12,48 +12,85 @@ WORK="$HOME/codecafe-v162-deploy"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 SAFE_DIR="$DATA/recovery-safety"
 SAFE_JSON="$SAFE_DIR/workspace-before-v162-$STAMP.json.gz"
+ROLLBACK_DIR="$HOME/codecafe-v162-rollback-$STAMP"
 SERVICE_STOPPED=0
+DEPLOYED=0
 
 cleanup() {
-  rm -rf "$WORK" 2>/dev/null || true
-  rm -f /tmp/deploy-v162-purge-storage-history.sh 2>/dev/null || true
-  rm -rf "$HOME/.npm/_npx" "$HOME/.npm/_cacache" 2>/dev/null || true
   if [ "$SERVICE_STOPPED" -eq 1 ]; then
     sudo systemctl restart "$SERVICE" 2>/dev/null || true
   fi
+  rm -rf "$WORK" 2>/dev/null || true
+  rm -rf "$HOME/.npm/_npx" "$HOME/.npm/_cacache" 2>/dev/null || true
 }
 trap cleanup EXIT
+
+fail_and_restore() {
+  echo
+  echo "ERROR: deployment verification failed. Restoring previous application."
+  if [ -d "$ROLLBACK_DIR/frontend" ]; then
+    rm -rf "$WEB/assets"
+    rm -f "$WEB/index.html"
+    cp -a "$ROLLBACK_DIR/frontend/assets" "$WEB/" 2>/dev/null || true
+    cp -a "$ROLLBACK_DIR/frontend/index.html" "$WEB/" 2>/dev/null || true
+  fi
+  if [ -f "$ROLLBACK_DIR/app.py" ] && [ -n "${BACKEND:-}" ]; then
+    sudo cp "$ROLLBACK_DIR/app.py" "$BACKEND" || true
+  fi
+  sudo rm -f "$NEW_DB" "$NEW_DB-wal" "$NEW_DB-shm" 2>/dev/null || true
+  sudo systemctl restart "$SERVICE" 2>/dev/null || true
+  SERVICE_STOPPED=0
+  exit 1
+}
 
 sudo -n true >/dev/null 2>&1 || { echo "ERROR: passwordless sudo unavailable"; exit 1; }
 
 echo "============================================================"
 echo " CODECAFE CV STUDIO 1.6.2"
-echo " SINGLE WORKSPACE STORAGE MIGRATION"
+echo " SAFE SINGLE-WORKSPACE MIGRATION"
 echo "============================================================"
 
 echo
-echo "=== 1. VERIFY CURRENT WORKSPACE ==="
+echo "=== 1. VERIFY CURRENT RECORDS ==="
 sudo test -f "$OLD_DB" || { echo "ERROR: current database missing: $OLD_DB"; exit 1; }
-sudo python3 - "$OLD_DB" <<'PY'
-import json, sqlite3, sys
+
+SOURCE_INFO="$(sudo python3 - "$OLD_DB" <<'PY'
+import hashlib,json,sqlite3,sys
 p=sys.argv[1]
 db=sqlite3.connect(f'file:{p}?mode=ro',uri=True)
 rows=db.execute('SELECT saved_at,digest,payload FROM backups ORDER BY revision DESC').fetchall()
 if len(rows)!=1:
-    raise SystemExit(f'ERROR: expected exactly one authoritative live workspace before migration; found {len(rows)} rows')
+    raise SystemExit(f'ERROR: expected exactly one live workspace; found {len(rows)} rows')
 saved,digest,raw=rows[0]
 obj=json.loads(raw); ws=obj.get('workspace',obj)
 docs=ws.get('documents',[]) if isinstance(ws,dict) else []
 libs=ws.get('professionalLibraries',[]) if isinstance(ws,dict) else []
-print('CV documents:',len(docs) if isinstance(docs,list) else 0)
-print('Libraries:',len(libs) if isinstance(libs,(list,dict)) else 0)
+lib_items=0
+vals=libs.values() if isinstance(libs,dict) else libs if isinstance(libs,list) else []
+for lib in vals:
+    if isinstance(lib,dict):
+        for key in ('records','items','entries','blocks'):
+            value=lib.get(key)
+            if isinstance(value,list): lib_items += len(value)
+for key in ('libraryItems','professionalLibraryItems'):
+    value=ws.get(key) if isinstance(ws,dict) else None
+    if isinstance(value,list): lib_items += len(value)
 if not isinstance(docs,list) or len(docs)<1:
-    raise SystemExit('ERROR: workspace has no CV documents; refusing migration')
+    raise SystemExit('ERROR: workspace has no CV documents')
+payload_sha=hashlib.sha256(raw.encode('utf-8')).hexdigest()
+print(f'{payload_sha}|{len(docs)}|{len(libs) if isinstance(libs,(list,dict)) else 0}|{lib_items}|{digest}|{saved}')
 db.close()
 PY
+)"
+IFS='|' read -r SOURCE_SHA SOURCE_CVS SOURCE_LIBS SOURCE_ITEMS SOURCE_DIGEST SOURCE_SAVED <<< "$SOURCE_INFO"
+
+echo "CV documents        : $SOURCE_CVS"
+echo "Professional Library: $SOURCE_LIBS"
+echo "Library items       : $SOURCE_ITEMS"
+echo "Payload SHA-256     : $SOURCE_SHA"
 
 echo
-echo "=== 2. CREATE CLEAN SAFETY COPY OF WORKSPACE CONTENT ==="
+echo "=== 2. CREATE CLEAN SAFETY COPY ==="
 sudo mkdir -p "$SAFE_DIR"
 sudo python3 - "$OLD_DB" "$SAFE_JSON" <<'PY'
 import gzip,json,sqlite3,sys
@@ -70,7 +107,7 @@ PY
 sudo ls -lh "$SAFE_JSON"
 
 echo
-echo "=== 3. DOWNLOAD AND BUILD 1.6.2 ==="
+echo "=== 3. DOWNLOAD AND BUILD 1.6.2 BEFORE TOUCHING LIVE APP ==="
 rm -rf "$WORK"
 git clone --depth 1 --branch "$BRANCH" "$REPO" "$WORK"
 cd "$WORK"
@@ -81,17 +118,24 @@ npx -y node@22 "$NPM_CLI" run build
 
 test -f dist/index.html
 test -d dist/assets
+python3 -m py_compile server/app.py
+
 if grep -RniE 'revision|revisi[oó]n' src server; then
   echo "ERROR: retired storage-history terminology remains in deployable source"
   exit 1
 fi
 
+echo "Build PASS"
+
 echo
-echo "=== 4. IDENTIFY LIVE BACKEND ==="
+echo "=== 4. IDENTIFY LIVE BACKEND AND PREPARE ROLLBACK ==="
 EXECSTART="$(sudo systemctl show "$SERVICE" -p ExecStart --value)"
 BACKEND="$(printf '%s\n' "$EXECSTART" | grep -oE '/[^ ;"]+\.py' | head -1)"
 sudo test -f "$BACKEND" || { echo "ERROR: backend not found: $BACKEND"; exit 1; }
-echo "$BACKEND"
+mkdir -p "$ROLLBACK_DIR/frontend"
+sudo cp "$BACKEND" "$ROLLBACK_DIR/app.py"
+cp -a "$WEB/index.html" "$ROLLBACK_DIR/frontend/" 2>/dev/null || true
+cp -a "$WEB/assets" "$ROLLBACK_DIR/frontend/" 2>/dev/null || true
 
 echo
 echo "=== 5. STOP SERVICE ==="
@@ -99,7 +143,7 @@ sudo systemctl stop "$SERVICE"
 SERVICE_STOPPED=1
 
 echo
-echo "=== 6. MIGRATE DATABASE TO SINGLETON WORKSPACE STATE ==="
+echo "=== 6. MIGRATE PAYLOAD BYTE-FOR-BYTE TO SINGLETON DATABASE ==="
 sudo rm -f "$NEW_DB" "$NEW_DB-wal" "$NEW_DB-shm"
 sudo python3 - "$OLD_DB" "$NEW_DB" <<'PY'
 import sqlite3,sys
@@ -119,105 +163,124 @@ new.execute('INSERT INTO workspace_state(id,saved_at,digest,payload) VALUES(1,?,
 if sessions:
     new.executemany('INSERT OR REPLACE INTO sessions(token_hash,csrf,expires_at) VALUES(?,?,?)',sessions)
 new.commit()
-if new.execute('SELECT COUNT(*) FROM workspace_state').fetchone()[0] != 1:
-    raise SystemExit('ERROR: singleton workspace migration failed')
 new.execute('VACUUM')
 new.close(); old.close()
 PY
 sudo chmod 600 "$NEW_DB"
 
+MIGRATED_INFO="$(sudo python3 - "$NEW_DB" <<'PY'
+import hashlib,json,sqlite3,sys
+p=sys.argv[1]
+db=sqlite3.connect(f'file:{p}?mode=ro',uri=True)
+row=db.execute('SELECT saved_at,digest,payload FROM workspace_state WHERE id=1').fetchone()
+if not row: raise SystemExit('ERROR: singleton workspace missing')
+saved,digest,raw=row
+obj=json.loads(raw); ws=obj.get('workspace',obj)
+docs=ws.get('documents',[]) if isinstance(ws,dict) else []
+libs=ws.get('professionalLibraries',[]) if isinstance(ws,dict) else []
+lib_items=0
+vals=libs.values() if isinstance(libs,dict) else libs if isinstance(libs,list) else []
+for lib in vals:
+    if isinstance(lib,dict):
+        for key in ('records','items','entries','blocks'):
+            value=lib.get(key)
+            if isinstance(value,list): lib_items += len(value)
+for key in ('libraryItems','professionalLibraryItems'):
+    value=ws.get(key) if isinstance(ws,dict) else None
+    if isinstance(value,list): lib_items += len(value)
+print(f'{hashlib.sha256(raw.encode("utf-8")).hexdigest()}|{len(docs) if isinstance(docs,list) else 0}|{len(libs) if isinstance(libs,(list,dict)) else 0}|{lib_items}|{digest}|{saved}')
+db.close()
+PY
+)"
+IFS='|' read -r NEW_SHA NEW_CVS NEW_LIBS NEW_ITEMS NEW_DIGEST NEW_SAVED <<< "$MIGRATED_INFO"
+
+if [ "$SOURCE_SHA" != "$NEW_SHA" ] || [ "$SOURCE_CVS" != "$NEW_CVS" ] || [ "$SOURCE_LIBS" != "$NEW_LIBS" ] || [ "$SOURCE_ITEMS" != "$NEW_ITEMS" ] || [ "$SOURCE_DIGEST" != "$NEW_DIGEST" ]; then
+  echo "ERROR: migrated records do not exactly match source"
+  fail_and_restore
+fi
+
+echo "Record verification PASS: payload is byte-for-byte identical"
+
 echo
-echo "=== 7. DEPLOY CLEAN BACKEND AND FRONTEND ==="
+echo "=== 7. DEPLOY BACKEND AND FRONTEND ==="
 OWNER="$(stat -c '%U' "$BACKEND")"
 GROUP="$(stat -c '%G' "$BACKEND")"
 MODE="$(stat -c '%a' "$BACKEND")"
 sudo cp server/app.py "$BACKEND"
 sudo chown "$OWNER:$GROUP" "$BACKEND"
 sudo chmod "$MODE" "$BACKEND"
-sudo python3 -m py_compile "$BACKEND"
 rm -rf "$WEB/assets"
 rm -f "$WEB/index.html"
 cp -a dist/assets "$WEB/"
 cp -a dist/index.html "$WEB/"
+DEPLOYED=1
 
 echo
-echo "=== 8. REMOVE OLD DATABASES AND HISTORICAL DEPLOYMENT COPIES ==="
-sudo rm -f "$OLD_DB" "$OLD_DB-wal" "$OLD_DB-shm"
-sudo rm -rf "$DATA/deployment-backups"
-sudo find "$SAFE_DIR" -maxdepth 1 -type f ! -name "$(basename "$SAFE_JSON")" -delete 2>/dev/null || true
-sudo find "$(dirname "$BACKEND")" -maxdepth 1 -type f -name '*.before-*' -delete 2>/dev/null || true
-find "$HOME" -maxdepth 1 -type d -name 'codecafe-v*' ! -path "$WORK" -exec rm -rf {} + 2>/dev/null || true
-rm -f /tmp/repair-* /tmp/codecafe-* 2>/dev/null || true
-
-echo
-echo "=== 9. START SERVICE ==="
+echo "=== 8. START AND VERIFY BEFORE DELETING OLD STORAGE ==="
 sudo systemctl daemon-reload
 sudo systemctl restart "$SERVICE"
 SERVICE_STOPPED=0
 sleep 3
-sudo systemctl is-active --quiet "$SERVICE"
-
+if ! sudo systemctl is-active --quiet "$SERVICE"; then
+  sudo journalctl -u "$SERVICE" -n 60 --no-pager || true
+  fail_and_restore
+fi
+if ! curl -fsS http://127.0.0.1:5002/api/health; then
+  fail_and_restore
+fi
 echo
-echo "=== 10. VERIFY WORKSPACE API AND DATA ==="
-curl -fsS http://127.0.0.1:5002/api/health; echo
-sudo python3 - "$NEW_DB" <<'PY'
-import json,sqlite3,sys
+
+FINAL_SHA="$(sudo python3 - "$NEW_DB" <<'PY'
+import hashlib,sqlite3,sys
 db=sqlite3.connect(f'file:{sys.argv[1]}?mode=ro',uri=True)
-row=db.execute('SELECT saved_at,digest,payload FROM workspace_state WHERE id=1').fetchone()
-if not row: raise SystemExit('ERROR: singleton workspace missing')
-obj=json.loads(row[2]); ws=obj.get('workspace',obj)
-docs=ws.get('documents',[]) if isinstance(ws,dict) else []
-libs=ws.get('professionalLibraries',[]) if isinstance(ws,dict) else []
-print('CV documents:',len(docs) if isinstance(docs,list) else 0)
-print('Libraries:',len(libs) if isinstance(libs,(list,dict)) else 0)
-print('Tables:',[r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")])
+row=db.execute('SELECT payload FROM workspace_state WHERE id=1').fetchone()
+if not row: raise SystemExit(1)
+print(hashlib.sha256(row[0].encode('utf-8')).hexdigest())
 db.close()
 PY
+)"
+if [ "$FINAL_SHA" != "$SOURCE_SHA" ]; then
+  echo "ERROR: live payload changed during deployment"
+  fail_and_restore
+fi
+
+echo "Live service PASS; records unchanged"
 
 echo
-echo "=== 11. PURGE RETIRED TERM FROM CODECAFE/USER ARTIFACTS ==="
-# Remove transient source clone first; it contains migration scripts by design.
-cd "$HOME"
-rm -rf "$WORK"
+echo "=== 9. ONLY NOW REMOVE OLD STORAGE-HISTORY DATABASES ==="
+sudo rm -f "$OLD_DB" "$OLD_DB-wal" "$OLD_DB-shm"
+sudo rm -rf "$DATA/deployment-backups"
+# Preserve only the clean JSON safety copy created before this migration.
+sudo find "$SAFE_DIR" -maxdepth 1 -type f ! -name "$(basename "$SAFE_JSON")" -delete 2>/dev/null || true
+# Remove obsolete backend copies and abandoned build directories.
+sudo find "$(dirname "$BACKEND")" -maxdepth 1 -type f -name '*.before-*' -delete 2>/dev/null || true
+find "$HOME" -maxdepth 1 -type d -name 'codecafe-v*' ! -path "$WORK" -exec rm -rf {} + 2>/dev/null || true
+rm -f /tmp/repair-* /tmp/codecafe-* 2>/dev/null || true
 
-# Sanitize shell history from this repair session.
-if [ -f "$HOME/.bash_history" ]; then
-  python3 - "$HOME/.bash_history" <<'PY'
-from pathlib import Path
-import re,sys
-p=Path(sys.argv[1]); s=p.read_text(errors='ignore')
-s=re.sub(r'revisi[oó]n(?:es)?','copy',s,flags=re.I)
-s=re.sub(r'revision(?:s)?','copy',s,flags=re.I)
-p.write_text(s)
-PY
+# Keep at most seven active-use recovery points.
+RECOVERY="$DATA/active-day-recovery"
+sudo mkdir -p "$RECOVERY"
+mapfile -t RECOVERIES < <(sudo find "$RECOVERY" -maxdepth 1 -type f -name 'codecafe-cv-*.recovery.json' -printf '%T@ %p\n' 2>/dev/null | sort -nr | cut -d' ' -f2-)
+if [ "${#RECOVERIES[@]}" -gt 7 ]; then
+  for old in "${RECOVERIES[@]:7}"; do sudo rm -f -- "$old"; done
 fi
 
-# If an old full source tree exists beside the live backend, sanitize dormant text files too.
-SOURCE_ROOT="/opt/codecafe-studio/apps/codecafe-cv-studio-source"
-if [ -d "$SOURCE_ROOT" ]; then
-  sudo grep -RIlZ -E 'revision|revisi[oó]n' "$SOURCE_ROOT" 2>/dev/null | while IFS= read -r -d '' f; do
-    sudo python3 - "$f" <<'PY'
-from pathlib import Path
-import re,sys
-p=Path(sys.argv[1])
-try: s=p.read_text(encoding='utf-8')
-except Exception: raise SystemExit(0)
-s=re.sub(r'revisi[oó]n(?:es)?','copy',s,flags=re.I)
-s=re.sub(r'revision(?:s)?','copy',s,flags=re.I)
-p.write_text(s,encoding='utf-8')
-PY
-  done
-fi
+echo
+echo "=== 10. FINAL RECORD REPORT ==="
+echo "CV documents        : $NEW_CVS"
+echo "Professional Library: $NEW_LIBS"
+echo "Library items       : $NEW_ITEMS"
+echo "Payload SHA-256     : $FINAL_SHA"
+echo "Safety copy         : $SAFE_JSON"
 
-LEFT="$(grep -RIlE 'revision|revisi[oó]n' /opt/codecafe-studio /home/ubuntu 2>/dev/null || true)"
-if [ -n "$LEFT" ]; then
-  echo "ERROR: retired term still exists in these CodeCafe/user files:"
-  echo "$LEFT"
+echo
+echo "=== 11. VERIFY OLD TERM IS ABSENT FROM LIVE CODECAFE APP ==="
+if sudo grep -RniE 'revision|revisi[oó]n' "$WEB" "$(dirname "$BACKEND")" 2>/dev/null; then
+  echo "ERROR: retired term remains in live application files"
   exit 1
 fi
-
 if sudo strings "$NEW_DB" | grep -qiE 'revision|revisi[oó]n'; then
-  echo "ERROR: retired term still exists inside workspace.sqlite3"
+  echo "ERROR: retired term remains inside workspace.sqlite3"
   exit 1
 fi
 
@@ -225,16 +288,20 @@ echo
 echo "=== 12. DISK ==="
 df -h /
 
+rm -rf "$ROLLBACK_DIR"
+
 echo
 echo "============================================================"
-echo " CODECAFE 1.6.2 READY"
+echo " CODECAFE CV STUDIO 1.6.2 READY"
 echo "============================================================"
-echo " ✓ one singleton workspace in EC2"
+echo " ✓ existing workspace payload preserved byte-for-byte"
+echo " ✓ CVs preserved: $NEW_CVS"
+echo " ✓ Professional Library preserved: $NEW_LIBS"
+echo " ✓ Library items preserved: $NEW_ITEMS"
+echo " ✓ all existing CV Studio frontend features retained"
+echo " ✓ one EC2 workspace state"
 echo " ✓ digest-based conflict protection"
-echo " ✓ max 7 active-use recovery files"
-echo " ✓ old numeric-history protocol removed"
-echo " ✓ old SQLite history databases removed"
-echo " ✓ old deployment/recovery copies removed"
-echo " ✓ live CodeCafe source/UI/database contains none of the retired term"
-echo " ✓ clean safety copy: $SAFE_JSON"
+echo " ✓ maximum 7 active-use recovery points"
+echo " ✓ old numeric-history storage removed after verification"
+echo " ✓ clean safety copy retained"
 echo "============================================================"
