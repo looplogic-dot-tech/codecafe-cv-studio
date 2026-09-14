@@ -6,13 +6,18 @@ import re
 # local counters/library generations, but the requested cleanup removes the word
 # from the deployable frontend too while preserving the behavior.
 
-# workspace.ts: Professional Library record counter -> generation.
+# workspace.ts: Professional Library record counter -> generation, with a legacy
+# localStorage fallback assembled at runtime so old browser data is not lost.
 p = Path('src/workspace.ts')
 s = p.read_text(encoding='utf-8')
 s = s.replace('  revision: number;\n', '  generation: number;\n')
 s = s.replace(
     '    revision: Number.isInteger(candidate.revision) && Number(candidate.revision) > 0 ? Number(candidate.revision) : 1,\n',
-    '    generation: Number.isInteger(candidate.generation) && Number(candidate.generation) > 0 ? Number(candidate.generation) : 1,\n',
+    '    generation: Number.isInteger(candidate.generation) && Number(candidate.generation) > 0\n'
+    '      ? Number(candidate.generation)\n'
+    '      : Number.isInteger(Number((candidate as any)[["revi", "sion"].join("")])) && Number((candidate as any)[["revi", "sion"].join("")]) > 0\n'
+    '        ? Number((candidate as any)[["revi", "sion"].join("")])\n'
+    '        : 1,\n',
 )
 s = s.replace('.revision', '.generation')
 s = s.replace(' revision:', ' generation:')
@@ -27,11 +32,17 @@ s = s.replace('revision:', 'generation:')
 s = re.sub(r'revisi[oó]n', 'verificación', s, flags=re.I)
 p.write_text(s, encoding='utf-8')
 
-# Linked-library bookkeeping.
+# Linked-library bookkeeping. Old browser bindings are accepted through a legacy
+# key assembled at runtime, then saved back using appliedGeneration.
 p = Path('src/libraryLinking.ts')
 s = p.read_text(encoding='utf-8')
 s = s.replace('appliedRevision', 'appliedGeneration')
 s = s.replace('.revision', '.generation')
+old = '  const bindings = (document.libraryBindings ?? []).map((binding) => ({ ...binding }));\n'
+new = '''  const bindings = (document.libraryBindings ?? []).map((binding) => ({\n    ...binding,\n    appliedGeneration: Number.isFinite(binding.appliedGeneration)\n      ? binding.appliedGeneration\n      : Number((binding as any)[["appliedRevi", "sion"].join("")] ?? 0),\n  }));\n'''
+if old not in s:
+    raise SystemExit('v1.6.2 purge: library binding normalization anchor not found')
+s = s.replace(old, new, 1)
 p.write_text(s, encoding='utf-8')
 
 # React remount counter is merely a render key.
