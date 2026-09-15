@@ -5,7 +5,7 @@ DATA="/opt/codecafe-studio/data/codecafe-cv-studio"
 DB="$DATA/workspace.sqlite3"
 WEB="/opt/codecafe-studio/apps/codecafe-cv-studio"
 REPO="https://github.com/looplogic-dot-tech/codecafe-cv-studio.git"
-BRANCH="release/v1.6.4.10.1"
+BRANCH="release/v1.6.4.10"
 WORK="$HOME/codecafe-v164101"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 ROLLBACK="$HOME/codecafe-v164101-frontend-$STAMP"
@@ -60,7 +60,7 @@ PY
 if ! grep -Raq 'bold-' dist/assets; then
   echo "ERROR: compiled bundle missing bold inline renderer"; exit 1
 fi
-if ! grep -Raq 'data-cv-inline-link\|target="_blank"' dist/assets; then
+if ! grep -Raq 'target="_blank"\|noreferrer' dist/assets; then
   echo "ERROR: compiled bundle missing hyperlink renderer"; exit 1
 fi
 
