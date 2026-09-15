@@ -33,7 +33,8 @@ BEFORE="$(fingerprint)"
 
 echo "============================================================"
 echo " CODECAFE CV STUDIO $VERSION"
-echo " RECOVERY: 1.6.4.10.2 BASE + DRIVE + PRINT WINDOW + VERSION"
+echo " RECOVERY: 1.6.4.10.2 BASE + DRIVE + VERSION"
+echo " PRINT IMPLEMENTATION PRESERVED"
 echo "============================================================"
 df -h /
 
@@ -57,24 +58,24 @@ assert pkg['version']=='1.6.4.10.2.2'
 app=Path('src/App.tsx').read_text(encoding='utf-8')
 cloud=Path('src/cloud.ts').read_text(encoding='utf-8')
 pe=Path('src/printEditorV3.ts').read_text(encoding='utf-8')
+pp=Path('src/printPreview.ts').read_text(encoding='utf-8')
 assert 'v1.6.4.10.2.2' in app
-assert 'codecafe-print-editor-launcher' in app
-assert '<button className="primary" onClick={() => window.print()}>{t.pdf}</button>' not in app
 assert 'if (stale && !window.google?.accounts.oauth2) stale.remove();' in cloud
 assert 'codecafeExactPrintPage' in pe
 assert 'sourceWraps.forEach' in pe
 assert 'break-before:page!important' in pe
 handler=pe[pe.find('print.onclick'):pe.find('actions.append(reset, print);')]
 assert 'break-after:page!important' not in handler
+assert 'button.className = "primary printEditorLauncherV2"' in pp
+assert 'actions.appendChild(button)' in pp
 assert Path('dist/index.html').is_file()
 assert Path('dist/assets').is_dir()
 print('PASS: visible version marker compiled from source')
-print('PASS: top Print/PDF opens Print Editor')
-print('PASS: exact Live Preview -> PDF page mapping retained')
 print('PASS: Google Drive stale-GIS reconnect recovery present')
+print('PASS: proven Print Editor launcher retained')
+print('PASS: exact Live Preview -> PDF page mapping retained')
 PY
 
-# Verify the production JS actually contains the markers before replacing anything.
 grep -Raq '1.6.4.10.2.2' dist/assets || { echo "ERROR: compiled bundle missing visible version"; exit 1; }
 grep -Raq 'codecafeExactPrintPage' dist/assets || { echo "ERROR: compiled bundle missing stable print mapping"; exit 1; }
 grep -Raq 'Google Identity Services tard' dist/assets || { echo "ERROR: compiled bundle missing Drive recovery"; exit 1; }
@@ -103,8 +104,8 @@ rm -rf "$ROLLBACK"
 echo "============================================================"
 echo " CODECAFE CV STUDIO $VERSION DEPLOYED"
 echo "✓ visible version shown in CV Studio"
-echo "✓ Google Drive Connect/reauthorize recovery restored"
-echo "✓ main Print/PDF button opens the Print Editor"
-echo "✓ known exact Live Preview -> PDF mapping retained"
+echo "✓ Google Drive reconnect recovery applied"
+echo "✓ proven Print Editor launcher retained"
+echo "✓ exact Live Preview -> PDF mapping retained"
 echo "✓ current CV workspace/database unchanged"
 echo "============================================================"
