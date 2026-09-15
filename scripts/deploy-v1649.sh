@@ -32,7 +32,7 @@ BEFORE="$(fingerprint)"
 
 echo "============================================================"
 echo " CODECAFE CV STUDIO 1.6.4.9"
-echo " CORRECTION: PRINT EXACT LIVE-PREVIEW PAGE STACK"
+echo " CORRECTION: EXACT LIVE-PREVIEW PAGE -> PDF PAGE"
 echo "============================================================"
 
 df -h /
@@ -64,18 +64,21 @@ pkg=json.loads(Path('package.json').read_text())
 assert pkg['version']=='1.6.4.9'
 pe=Path('src/printEditorV3.ts').read_text(encoding='utf-8')
 app=Path('src/App.tsx').read_text(encoding='utf-8')
-assert 'codecafe-print-only-stack' in pe
-assert 'liveHost.cloneNode(true)' in pe
-assert '.livePageWrap:last-child' in pe
+assert 'codecafeExactPrintPage' in pe
+assert 'sourceWraps.forEach' in pe
+assert 'break-before:page!important' in pe
+handler=pe[pe.find('print.onclick'):pe.find('actions.append(reset, print);')]
+assert 'break-after:page!important' not in handler
+assert 'installRuntimePrintStyle(settings);' not in handler
 assert 'data-cv-inline-link="1"' in app
 assert Path('dist/index.html').is_file()
 assert Path('dist/assets').is_dir()
-print('PASS: exact canonical Live Preview stack is used for print/PDF')
+print('PASS: one canonical Live Preview page maps to one PDF page with no print reflow')
 print('PASS: hyperlink renderer retained')
 PY
 
-if ! grep -Raq 'codecafe-print-only-stack' dist/assets; then
-  echo "ERROR: compiled bundle missing exact-stack print marker"
+if ! grep -Raq 'codecafeExactPrintPage' dist/assets; then
+  echo "ERROR: compiled bundle missing exact-page print marker"
   exit 1
 fi
 if ! grep -Raq 'data-cv-inline-link' dist/assets; then
@@ -102,9 +105,9 @@ rm -rf "$ROLLBACK"
 
 echo "============================================================"
 echo " CODECAFE CV STUDIO 1.6.4.9 DEPLOYED"
-echo "✓ prints the exact Live Preview stack"
-echo "✓ no per-page reconstruction/reflow in print handler"
-echo "✓ final page does not force another page break"
+echo "✓ each Live Preview page prints as exactly one PDF page"
+echo "✓ no second print-pagination/reflow pass"
+echo "✓ no forced break after the last page"
 echo "✓ hyperlinks retained"
 echo "✓ workspace unchanged"
 echo "============================================================"
