@@ -9,7 +9,7 @@ import "./professional-library.css";
 import "./library-composer.css";
 import "./live-preview-pages.css";
 import { prepareLinkedWorkspaceFromStorage } from "./libraryLinking";
-import { installPrintPreview } from "./printPreview";
+import { installPrintEditorV3 } from "./printEditorV3";
 import { installLivePreviewPages } from "./livePreviewPages";
 import { installSyncNotice } from "./syncNotice";
 import { installGoogleDriveAutoLoadV153 } from "./google-drive-autoload-v153";
@@ -49,7 +49,7 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 
-installPrintPreview();
+installPrintEditorV3();
 installLivePreviewPages();
 installSyncNotice();
 installGoogleDriveAutoLoadV153();
