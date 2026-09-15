@@ -32,7 +32,7 @@ BEFORE="$(fingerprint)"
 
 echo "============================================================"
 echo " CODECAFE CV STUDIO 1.6.4.5"
-echo " FINAL INLINE HYPERLINK CORRECTION"
+echo " STABLE PRINT / PAGE BREAKS + INLINE HYPERLINKS"
 echo "============================================================"
 
 df -h /
@@ -68,15 +68,26 @@ pkg=json.loads(Path('package.json').read_text())
 assert pkg['version']=='1.6.4.5'
 app=Path('src/App.tsx').read_text(encoding='utf-8')
 css=Path('src/styles.css').read_text(encoding='utf-8')
+print_editor=Path('src/printEditorV3.ts').read_text(encoding='utf-8')
+live_pages=Path('src/livePreviewPages.ts').read_text(encoding='utf-8')
+main=Path('src/main.tsx').read_text(encoding='utf-8')
 assert 'data-cv-inline-link="1"' in app
 assert '<StructuredLines value={cv.certifications} />' in app
 assert '<InlineText value={cv.summary} />' in app
 assert '<li key={n}><InlineText value={bullet} /></li>' in app
 assert 'printableInlineText(cv.summary)' in app
 assert 'codecafe-inline-links-v1645' in css
+assert 'manualBreaks: string[]' in print_editor
+assert 'Place page breaks' in print_editor
+assert 'manualPrintBreak{break-before:page' in print_editor
+assert 'applyManualBreakLayout(settings)' in print_editor
+assert 'const anchor = document.querySelector<HTMLElement>(".previewTop")' in print_editor
+assert 'existingHost?.isConnected' in live_pages
+assert 'installPrintEditorV3();' in main
+assert 'installPrintPreview();' not in main
 assert Path('dist/index.html').is_file()
 assert Path('dist/assets').is_dir()
-print('PASS: source hyperlink renderer is present')
+print('PASS: hyperlinks + V3 print controls + page breaks are present in source')
 PY
 
 if ! grep -Raq 'data-cv-inline-link' dist/assets; then
@@ -87,8 +98,16 @@ if ! grep -Raq 'cvInlineLink' dist/assets; then
   echo "ERROR: compiled JavaScript does not contain hyperlink class"
   exit 1
 fi
+if ! grep -Raq 'Place page breaks' dist/assets; then
+  echo "ERROR: compiled JavaScript does not contain page-break controls"
+  exit 1
+fi
+if ! grep -Raq 'manualPrintBreak' dist/assets; then
+  echo "ERROR: compiled JavaScript does not contain manual page-break support"
+  exit 1
+fi
 
-echo "PASS: compiled production bundle contains hyperlink renderer"
+echo "PASS: compiled production bundle contains hyperlinks and page-break controls"
 echo "Built assets:"
 find dist/assets -maxdepth 1 -type f -printf '  %f\n' | sort
 
@@ -101,7 +120,6 @@ rm -f "$WEB/index.html"
 cp -a dist/assets "$WEB/"
 cp -a dist/index.html "$WEB/"
 
-# Verify the live files, not just the build directory.
 if ! grep -Raq 'data-cv-inline-link' "$WEB/assets"; then
   echo "ERROR: live production assets do not contain hyperlink renderer; rolling back"
   rm -rf "$WEB/assets"; rm -f "$WEB/index.html"
@@ -109,8 +127,15 @@ if ! grep -Raq 'data-cv-inline-link' "$WEB/assets"; then
   cp -a "$ROLLBACK/index.html" "$WEB/" 2>/dev/null || true
   exit 1
 fi
+if ! grep -Raq 'Place page breaks' "$WEB/assets"; then
+  echo "ERROR: live production assets do not contain page-break controls; rolling back"
+  rm -rf "$WEB/assets"; rm -f "$WEB/index.html"
+  cp -a "$ROLLBACK/assets" "$WEB/" 2>/dev/null || true
+  cp -a "$ROLLBACK/index.html" "$WEB/" 2>/dev/null || true
+  exit 1
+fi
 
-echo "PASS: live production bundle contains hyperlink renderer"
+echo "PASS: live production bundle contains hyperlinks and page breaks"
 
 AFTER="$(fingerprint)"
 if [ "$BEFORE" != "$AFTER" ]; then
@@ -124,10 +149,11 @@ rm -rf "$ROLLBACK"
 
 echo "============================================================"
 echo " CODECAFE CV STUDIO 1.6.4.5 DEPLOYED"
+echo "✓ page-by-page Live Preview retained"
+echo "✓ manual page-break controls restored"
+echo "✓ existing V3 print controls retained"
+echo "✓ Print/PDF launcher kept in Live Preview header"
 echo "✓ [text](https://url) rendered in Live Preview"
-echo "✓ bare https:// URLs rendered in Live Preview"
-echo "✓ Certifications/Coursework bypasses destructive structured parsing"
-echo "✓ Summary and experience bullets support inline links"
 echo "✓ printable/PDF output uses the same link renderer"
 echo "✓ compiled LIVE bundle verified"
 echo "✓ workspace unchanged"
