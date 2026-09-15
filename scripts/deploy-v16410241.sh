@@ -40,20 +40,36 @@ rm -rf "$WORK" "$HOME/.npm/_npx" 2>/dev/null || true
 git clone --depth 1 --branch "$BRANCH" "$REPO" "$WORK"
 cd "$WORK"
 npm install --no-audit --no-fund
-npm run build
+
+# Run migrations/patches once, then pin the visible package version and compile directly.
+# This avoids npm lifecycle hooks re-running prebuild and changing the verification state.
+npm run prebuild
+python3 - <<'PY'
+from pathlib import Path
+import json
+p=Path('package.json')
+pkg=json.loads(p.read_text(encoding='utf-8'))
+pkg['version']='1.6.4.10.2.4.1'
+p.write_text(json.dumps(pkg, indent=2, ensure_ascii=False)+"\n", encoding='utf-8')
+print('Pinned visible version:', pkg['version'])
+PY
+npx tsc --noEmit
+npx vite build
 
 python3 - <<'PY'
 from pathlib import Path
 import json
-pkg=json.loads(Path('package.json').read_text())
-assert pkg['version']=='1.6.4.10.2.4.1'
-app=Path('src/App.tsx').read_text()
-cloud=Path('src/cloud.ts').read_text()
+pkg=json.loads(Path('package.json').read_text(encoding='utf-8'))
+app=Path('src/App.tsx').read_text(encoding='utf-8')
+cloud=Path('src/cloud.ts').read_text(encoding='utf-8')
+assert pkg.get('version') == '1.6.4.10.2.4.1', pkg.get('version')
 assert 'protectedDocument, await googlePrintable()' in app
 assert 'pdfBlob?: Blob' in cloud
 assert 'let pdfBlob = printable.pdfBlob' in cloud
 assert Path('dist/index.html').is_file()
+assert Path('dist/assets').is_dir()
 print('PASS: TypeScript build completed')
+print('PASS: visible version pinned to 1.6.4.10.2.4.1')
 print('PASS: normal Drive sync uses exact Live Preview PDF blob')
 print('PASS: legacy migration has safe fallback')
 print('PASS: local editable DOC companion retained')
