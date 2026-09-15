@@ -81,13 +81,18 @@ assert 'manualBreaks: string[]' in print_editor
 assert 'Place page breaks' in print_editor
 assert 'manualPrintBreak{break-before:page' in print_editor
 assert 'applyManualBreakLayout(settings)' in print_editor
-assert 'const anchor = document.querySelector<HTMLElement>(".previewTop")' in print_editor
+assert 'id="codecafe-print-editor-launcher" className="primary"' in app
+assert 'codecafe-open-print-editor' in app
+assert app.index('cloudButton ${cloudStatus}') < app.index('id="codecafe-print-editor-launcher"')
+assert 'const anchor = document.querySelector<HTMLElement>(".previewTop")' not in print_editor
+assert 'const anchor = document.querySelector<HTMLElement>(".topActions")' not in print_editor
+assert 'window.addEventListener("codecafe-open-print-editor", openEditor);' in print_editor
 assert 'existingHost?.isConnected' in live_pages
 assert 'installPrintEditorV3();' in main
 assert 'installPrintPreview();' not in main
 assert Path('dist/index.html').is_file()
 assert Path('dist/assets').is_dir()
-print('PASS: hyperlinks + V3 print controls + page breaks are present in source')
+print('PASS: hyperlinks + V3 print controls + page breaks + original print-button placement are present in source')
 PY
 
 if ! grep -Raq 'data-cv-inline-link' dist/assets; then
@@ -106,8 +111,12 @@ if ! grep -Raq 'manualPrintBreak' dist/assets; then
   echo "ERROR: compiled JavaScript does not contain manual page-break support"
   exit 1
 fi
+if ! grep -Raq 'codecafe-open-print-editor' dist/assets; then
+  echo "ERROR: compiled JavaScript does not contain original Print/PDF button binding"
+  exit 1
+fi
 
-echo "PASS: compiled production bundle contains hyperlinks and page-break controls"
+echo "PASS: compiled production bundle contains hyperlinks, page breaks and original print-button binding"
 echo "Built assets:"
 find dist/assets -maxdepth 1 -type f -printf '  %f\n' | sort
 
@@ -134,8 +143,15 @@ if ! grep -Raq 'Place page breaks' "$WEB/assets"; then
   cp -a "$ROLLBACK/index.html" "$WEB/" 2>/dev/null || true
   exit 1
 fi
+if ! grep -Raq 'codecafe-open-print-editor' "$WEB/assets"; then
+  echo "ERROR: live production assets do not contain original Print/PDF button binding; rolling back"
+  rm -rf "$WEB/assets"; rm -f "$WEB/index.html"
+  cp -a "$ROLLBACK/assets" "$WEB/" 2>/dev/null || true
+  cp -a "$ROLLBACK/index.html" "$WEB/" 2>/dev/null || true
+  exit 1
+fi
 
-echo "PASS: live production bundle contains hyperlinks and page breaks"
+echo "PASS: live production bundle contains hyperlinks, page breaks and original print-button binding"
 
 AFTER="$(fingerprint)"
 if [ "$BEFORE" != "$AFTER" ]; then
@@ -150,9 +166,9 @@ rm -rf "$ROLLBACK"
 echo "============================================================"
 echo " CODECAFE CV STUDIO 1.6.4.5 DEPLOYED"
 echo "✓ page-by-page Live Preview retained"
-echo "✓ manual page-break controls restored"
+echo "✓ manual page-break controls retained"
 echo "✓ existing V3 print controls retained"
-echo "✓ Print/PDF launcher kept in Live Preview header"
+echo "✓ original React Print/PDF button restored after Cloud in the top action bar"
 echo "✓ [text](https://url) rendered in Live Preview"
 echo "✓ printable/PDF output uses the same link renderer"
 echo "✓ compiled LIVE bundle verified"
