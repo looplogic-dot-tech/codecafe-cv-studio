@@ -1,11 +1,11 @@
 {
   "name": "codecafe-cv-studio",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "python3 scripts/apply-v158-stability.py && python3 scripts/apply-v158b-migration.py && python3 scripts/apply-v162-fix-migration.py && python3 scripts/apply-v159-storage-policy.py && python3 scripts/apply-v1510-storage-browser.py && python3 scripts/apply-v1511-storage-ui.py && python3 scripts/apply-v1511-migration-report.py && python3 scripts/apply-v161-explicit-disconnect.py && python3 scripts/apply-v162-single-workspace.py && python3 scripts/apply-v162-purge-word.py && python3 scripts/apply-v163-canonical-baseline.py",
+    "prebuild": "python3 scripts/apply-v158-stability.py && python3 scripts/apply-v158b-migration.py && python3 scripts/apply-v162-fix-migration.py && python3 scripts/apply-v159-storage-policy.py && python3 scripts/apply-v1510-storage-browser.py && python3 scripts/apply-v1511-storage-ui.py && python3 scripts/apply-v1511-migration-report.py && python3 scripts/apply-v161-explicit-disconnect.py && python3 scripts/apply-v162-single-workspace.py && python3 scripts/apply-v162-purge-word.py && python3 scripts/apply-v163-canonical-baseline.py && python3 scripts/apply-v164-inline-links.py",
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
