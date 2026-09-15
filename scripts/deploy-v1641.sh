@@ -12,7 +12,6 @@ ROLLBACK="$HOME/codecafe-v1641-frontend-$STAMP"
 
 cleanup(){
   rm -rf "$WORK" 2>/dev/null || true
-  rm -rf "$HOME/.npm/_npx" "$HOME/.npm/_cacache" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -45,9 +44,14 @@ cd "$WORK"
 
 echo "Branch: $(git branch --show-current)"
 echo "Commit: $(git rev-parse HEAD)"
+echo "Node: $(node --version 2>/dev/null || echo missing)"
+echo "npm: $(npm --version 2>/dev/null || echo missing)"
+
+command -v node >/dev/null 2>&1 || { echo "ERROR: Node.js is not installed on this server"; exit 1; }
+command -v npm >/dev/null 2>&1 || { echo "ERROR: npm is not installed on this server"; exit 1; }
 
 python3 - <<'PY'
-import json
+import json, subprocess
 from pathlib import Path
 p=json.loads(Path('package.json').read_text())
 assert p['version']=='1.6.4.1', f"wrong version: {p['version']}"
@@ -60,12 +64,18 @@ for required in (
     'assert-v1641-autosave-single-document.py',
 ):
     assert required in pre, f'missing prebuild step: {required}'
+version=subprocess.check_output(['node','-p','process.versions.node'], text=True).strip()
+major, minor, patch=(int(x) for x in version.split('.')[:3])
+if not (major >= 22 or (major == 20 and minor >= 19)):
+    raise SystemExit(f'ERROR: installed Node {version} is too old; need Node 20.19+ or 22+. Deployment stopped before changing the live site.')
 print('PASS: correction build 1.6.4.1')
+print(f'PASS: using installed Node {version}; no npx Node download')
 PY
 
-NPM_CLI="$(readlink -f "$(command -v npm)")"
-npx -y node@22 "$NPM_CLI" ci
-npx -y node@22 "$NPM_CLI" run prebuild
+# Use the already installed Node/npm. Do not bootstrap node@22 through npx;
+# that download was the source of the long reify:node-bin-setup stall.
+npm ci --no-audit --no-fund
+npm run prebuild
 
 python3 - <<'PY'
 from pathlib import Path
@@ -73,24 +83,16 @@ app=Path('src/App.tsx').read_text(encoding='utf-8')
 pe=Path('src/printEditorV3.ts').read_text(encoding='utf-8')
 workspace=Path('src/workspace.ts').read_text(encoding='utf-8')
 cloud=Path('src/cloud.ts').read_text(encoding='utf-8')
-
-# Configurable fields immediately control live preview.
 assert 'fieldId="skills"' in app
 assert 'fieldId="education"' in app
 assert '!isFieldHidden("skills", t.keywords)' in app
 assert '!isFieldHidden("education", t.education)' in app
 assert 'onVisibilityChange?.()' in app
-
-# Hyperlinks remain part of 1.6.4.
 assert 'function InlineText' in app
 assert 'href={match[2]}' in app or 'href={href}' in app
-
-# Print preview must render CV content, not only the page shell.
 assert 'printEditorContentViewport' in pe
 assert 'clone.classList.remove("paper")' not in pe
 assert 'clone.classList.add("printEditorFlowContent")' in pe
-
-# Saving updates the same active document instead of adding another CV.
 start=workspace.find('export function replaceCurrentDocument(')
 end=workspace.find('\nexport function saveWorkspaceLocal', start)
 body=workspace[start:end]
@@ -100,15 +102,14 @@ assert 'documents: [...' not in body
 assert 'method: existingId ? "PATCH" : "POST"' in cloud
 assert '/api/workspace' in cloud
 assert '/api/backups' not in cloud
-
 print('PASS: field deletion/restoration updates live preview')
 print('PASS: inline hyperlinks retained')
 print('PASS: print editor content retained')
 print('PASS: autosave/save updates the same CV document')
 PY
 
-npx -y node@22 ./node_modules/typescript/bin/tsc --noEmit
-npx -y node@22 ./node_modules/vite/bin/vite.js build
+./node_modules/.bin/tsc --noEmit
+./node_modules/.bin/vite build
 
 test -f dist/index.html
 test -d dist/assets
