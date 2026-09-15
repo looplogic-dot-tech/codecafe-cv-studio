@@ -32,15 +32,48 @@ BEFORE="$(fingerprint)"
 
 echo "============================================================"
 echo " CODECAFE CV STUDIO 1.6.4.2"
-echo " CORRECTION: HYPERLINK RENDERING"
+echo " CORRECTION: HYPERLINK RENDERING + SAFE DEPLOY"
 echo "============================================================"
+
+echo
+echo_disk(){ df -h /; df -i /; }
+echo "=== DISK BEFORE ==="
+echo_disk
+
+# Free only disposable build/cache space. Never touch /opt/codecafe-studio/data.
+rm -rf "$HOME"/codecafe-v164* "$HOME/.npm/_npx" "$HOME/.npm/_cacache" 2>/dev/null || true
+sudo apt-get clean >/dev/null 2>&1 || true
+sudo journalctl --vacuum-time=7d >/dev/null 2>&1 || true
+
+echo "=== DISK AFTER SAFE CLEANUP ==="
+echo_disk
+
+AVAIL_KB="$(df -Pk / | awk 'NR==2{print $4}')"
+[ "$AVAIL_KB" -ge 700000 ] || {
+  echo "ERROR: less than ~700 MB free on /. Deployment stopped before changing live site."
+  exit 1
+}
+
+NODE_VERSION="$(node -p 'process.versions.node' 2>/dev/null || echo 0.0.0)"
+NODE_MAJOR="${NODE_VERSION%%.*}"
+NODE_MINOR="$(printf '%s' "$NODE_VERSION" | cut -d. -f2)"
+if [ "$NODE_MAJOR" -lt 20 ] || { [ "$NODE_MAJOR" -eq 20 ] && [ "$NODE_MINOR" -lt 19 ]; }; then
+  echo "=== INSTALLING NODE 22 ==="
+  sudo apt-get update
+  sudo apt-get install -y ca-certificates curl gnupg
+  sudo mkdir -p /etc/apt/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+  sudo apt-get update
+  sudo apt-get install -y nodejs
+fi
+
+echo "Node: $(node --version)"
+echo "npm:  $(npm --version)"
 
 rm -rf "$WORK"
 git clone --depth 1 --branch "$BRANCH" "$REPO" "$WORK"
 cd "$WORK"
-
-NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
-[ "$NODE_MAJOR" -ge 20 ] || { echo "ERROR: Node 20.19+ or 22+ required"; exit 1; }
 
 npm ci
 npm run prebuild
@@ -55,7 +88,9 @@ assert 'className="cvInlineLink"' in app
 assert '<InlineText value={cv.summary} />' in app
 assert 'printableInlineText(cv.summary)' in app
 assert 'href={href}' in app
+assert 'assert-v1641-autosave-single-document.py' in Path('package.json').read_text()
 print('PASS: hyperlink renderer active in live preview and printable output')
+print('PASS: autosave single-document regression guard retained')
 PY
 
 npm run build
@@ -87,7 +122,8 @@ echo "============================================================"
 echo " CODECAFE CV STUDIO 1.6.4.2 DEPLOYED"
 echo "✓ Markdown-style links render in Live Preview"
 echo "✓ bare https:// links render in Live Preview"
-echo "✓ configurable summary/tools also support links"
+echo "✓ configurable summary/tools support links"
 echo "✓ links retained in printable/PDF output"
+echo "✓ 1.6.4.1 regression fixes retained"
 echo "✓ workspace unchanged"
 echo "============================================================"
