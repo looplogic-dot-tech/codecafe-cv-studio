@@ -1,6 +1,11 @@
 from pathlib import Path
 
 p = Path('src/App.tsx')
+print_editor = Path('src/printEditorV3.ts')
+live_preview_pages = Path('src/livePreviewPages.ts')
+
+print_before = print_editor.read_bytes()
+live_before = live_preview_pages.read_bytes()
 s = p.read_text(encoding='utf-8')
 
 # Replace functions by explicit neighboring function boundaries. Do NOT parse braces:
@@ -40,8 +45,8 @@ s = replace_between(
     new_printable,
 )
 
-# Live React renderer. Locate it after StructuredLines and before BoldInlineText.
-# This preserves links and restores inline **bold** without touching layout/print code.
+# Live React renderer. Locate it by stable function boundaries injected by the existing
+# hyperlink patches. This preserves links and restores inline **bold** without touching layout.
 new_inline = r'''function InlineText({ value }: { value: string }) {
   const parts: React.ReactNode[] = [];
   const tokenPattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*(.+?)\*\*/gi;
@@ -64,7 +69,6 @@ new_inline = r'''function InlineText({ value }: { value: string }) {
   return <>{parts}</>;
 }'''
 
-# InlineText is injected by the existing hyperlink patches during prebuild.
 if 'function InlineText({ value }: { value: string }) {' not in s:
     raise SystemExit('ERROR: InlineText renderer missing before isolated bold fix')
 s = replace_between(
@@ -75,7 +79,7 @@ s = replace_between(
 )
 
 # Project stack already routes through BoldInlineText from 1.6.4.10.2.3.
-# Make its printable companion use the same general inline renderer so **...** is stripped/rendered.
+# Make its portable companion use the general inline renderer so **...** is rendered, not printed.
 s = s.replace(
     '<strong>${printableBoldInline(project.stack)}</strong>',
     '<strong>${printableInlineText(project.stack)}</strong>',
@@ -88,7 +92,7 @@ s = s.replace(
 p.write_text(s, encoding='utf-8')
 final = p.read_text(encoding='utf-8')
 
-# Focused regression guards. These fail before build/deploy if any protected behavior disappears.
+# Focused regression guards. Fail the build before deployment if protected behavior disappears.
 checks = {
     'live inline bold': 'key={`bold-${index}`}',
     'live hyperlinks': 'target="_blank" rel="noreferrer"',
@@ -104,10 +108,16 @@ for name, marker in checks.items():
     if marker not in final:
         raise SystemExit(f'ERROR: regression guard failed: {name}')
 
+# Absolute lock for the two print files during THIS correction.
+if print_editor.read_bytes() != print_before:
+    raise SystemExit('ERROR: printEditorV3.ts changed during inline-bold correction')
+if live_preview_pages.read_bytes() != live_before:
+    raise SystemExit('ERROR: livePreviewPages.ts changed during inline-bold correction')
+
 print('PASS: **inline bold** restored in Live Preview')
 print('PASS: hyperlinks retained')
 print('PASS: Technology Stack bold retained without literal asterisks')
 print('PASS: Drive Live Preview PDF path retained')
 print('PASS: local editable DOC retained')
 print('PASS: canonical CV deletion retained')
-print('PASS: printEditorV3.ts and livePreviewPages.ts untouched')
+print('PASS: printEditorV3.ts and livePreviewPages.ts unchanged by this correction')
